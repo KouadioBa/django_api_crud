@@ -1,65 +1,39 @@
-import pandas as pd
-import logging
-from django.contrib.auth import get_user_model
-from django.urls import reverse_lazy
-from django.db.models import Sum
-from django.http import Http404
-from django.core.serializers.json import DjangoJSONEncoder
-from django.db.models import Count
-from django.core import exceptions
-from django.contrib.auth.decorators import login_required
 import json
-from django.views.decorators.csrf import csrf_exempt
-from django.shortcuts import get_object_or_404
-from rest_framework.decorators import action
-from rest_framework.generics import RetrieveUpdateDestroyAPIView
-from rest_framework.exceptions import AuthenticationFailed
-from django.shortcuts import get_object_or_404
-from django.shortcuts import render
-from rest_framework.decorators import authentication_classes, permission_classes
-from rest_framework.permissions import AllowAny
-from rest_framework_simplejwt.views import TokenObtainPairView
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from rest_framework.authtoken.views import ObtainAuthToken
-from rest_framework.authtoken.models import Token
-from django.utils import timezone
-from django.conf import settings
-from rest_framework import viewsets, serializers,status
-from rest_framework.response import Response
-from django.http import HttpResponse
-from rest_framework.views import APIView
-from django.shortcuts import render
-from .serializers import CountrySerializer,LocalitySerializer,EducationSerializer,UserSerializer,TypeIDSerializer,MediaSerializer,KycSerializer,ClientsSerializer,DashboardsSerializer,ProduitSerializer
-from .serializers import SectionsSerializer,PosSerializer,IndustrySerializer,DomaineSerializer,ExamSerializer,UserExamenSerializer,AnswersExamen
-from django.shortcuts import render
-from rest_framework.exceptions import AuthenticationFailed
-import jwt, datetime,pytz
-from datetime import date, datetime, timedelta
-from rest_framework_jwt.authentication import JSONWebTokenAuthentication
-from rest_framework.permissions import IsAuthenticated
-from .authentication import ExpiringTokenAuthentication
-from .models import Chapters,Exam,UserExam
-from django.http import JsonResponse
+import pandas as pd
+import datetime,pytz
 import random, string, os,json
-from .models import EducationLevel,Locality,User,Countries,TokenPin,TypeID,Media,Kyc,Clients,Dashboards,Industry,Produit,Training,AnswersSection,UserScoreExam
+from django.db.models import Sum
 from django.utils import timezone
-from .models import Kyc, User, EducationLevel, Locality, Countries, TypeID, Media,Footsoldiers,Pos,Domaine,UsersClient,Target,Sections,QuizSection,Privilege
+from django.db.models import Count
+from datetime import datetime, timedelta
+from django.db.models import Prefetch
+from django.utils.decorators import method_decorator
+from django.http import Http404,HttpResponse,JsonResponse
+from .authentication import ExpiringTokenAuthentication
 
-from django_filters import rest_framework as filters
-from rest_framework import generics
-from .models import TypeID
-from .serializers import TypeIDSerializer ,UsersClientSerializer,TargetSerializer,ChaptersSerializer,QuizSectionSerializer,QuizExamen,QuizExamenSerializer,AnswersExamenSerializer
 from django.middleware.csrf import get_token
-#from rest_framework import filters
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
+from django.shortcuts import get_object_or_404
+from django.contrib.auth import authenticate,logout
+
+from .serializers import CountrySerializer,AnswersSectionSerializer,EducationSerializer,UserSerializer,TypeIDSerializer,MediaSerializer,ClientsSerializer,DashboardsSerializer,FootsoldiersSerializer
+from .serializers import SectionsSerializer,PosSerializer,ProduitSerializer,ExamSerializer,UserExamenSerializer,AnswersExamen,UploadSerializer,TrainingSerializer,UserScoreExamSerializer
+from .serializers import TypeIDSerializer ,UsersClientSerializer,TargetSerializer,ChaptersSerializer,QuizSectionSerializer,QuizExamen,QuizExamenSerializer,AnswersExamenSerializer
+
+from .models import EducationLevel,Locality,User,Countries,TokenPin,TypeID,Media,Kyc,Clients,Dashboards,Industry,Produit,Training,AnswersSection,UserScoreExam,Chapters,Exam
+from .models import Kyc, User, EducationLevel, Locality, Countries, TypeID, Media,Footsoldiers,Pos,Domaine,UsersClient,Target,Sections,QuizSection,Privilege,UserExam,TypeID
+
+from rest_framework.views import APIView
 from rest_framework.viewsets import ViewSet
 from rest_framework.response import Response
-from .serializers import UploadSerializer,TrainingSerializer,UserScoreExamSerializer
+from rest_framework.authtoken.models import Token
+from rest_framework import viewsets,status,generics
+from django_filters import rest_framework as filters
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.authtoken.views import ObtainAuthToken
+from rest_framework.decorators import authentication_classes, permission_classes,api_view
 from rest_framework.parsers import MultiPartParser, FormParser,FileUploadParser
-from rest_framework.response import Response
-from rest_framework.decorators import api_view
-from django.contrib.auth.hashers import make_password
-from django.contrib.auth import authenticate
-from django.contrib.auth import logout
 
 
 ######################################### Login, token ##################################################
@@ -75,28 +49,31 @@ class CustomAuthToken(ObtainAuthToken):
 
         if not user:
             data['login_status'] = 'Echec'
-        else:
-            utc_now = datetime.utcnow()
-            utc_now = utc_now.replace(tzinfo=pytz.utc)
 
-            result = Token.objects.filter(user=user, created__lt=utc_now - timedelta(seconds=10)).delete()
+        utc_now = datetime.utcnow()
+        utc_now = utc_now.replace(tzinfo=pytz.utc)
 
-            # Create a new token for the user
-            token, created = Token.objects.get_or_create(user=user)
+        result = Token.objects.filter(user=user, created__lt=utc_now - timedelta(seconds=10)).delete()
 
-            # Set the expiration time for the token
-            expiration_time = timezone.now() + timezone.timedelta(seconds=7200)
-            token.expires = expiration_time
-            token.save()
+        # Create a new token for the user
+        token, created = Token.objects.get_or_create(user=user)
 
-            user_serializer = UserSerializer(user)
-            data = {
-                'user': user_serializer.data,
-                'token': token.key,
-                'token_status': 'Token valide' if not created else 'Nouveau Token',
-                'date_expiration': expiration_time,
-                'login_status': 'Valid',
-            }
+        # Set the expiration time for the token
+        expiration_time = timezone.now() + timezone.timedelta(seconds=7200)
+        token.expires = expiration_time
+        token.save()
+
+        if token.expires < timezone.now():
+            data['token_status'] = 'Token invalide'
+
+        user_serializer = UserSerializer(user)
+        data = {
+            'user': user_serializer.data,
+            'token': token.key,
+            'token_status': 'Token valide' if not created else 'Nouveau Token',
+            'date_expiration': expiration_time,
+            'login_status': 'Valid',
+        }
         return Response(data=data)
 
 # déconnexion super admin
@@ -108,8 +85,8 @@ class LogoutView(APIView):
         Token.objects.filter(key=auth_token).delete()
         # Déconnecter l'utilisateur de la session
         logout(request)
-        return Response({'message': 'Déconnecté avec succès'})
-    
+        return Response({'message': 'Vous êtes déconnecter'})
+
 ######################################### CRUD for user ##################################################
 # list for user
 class UserView(APIView):
@@ -117,15 +94,86 @@ class UserView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        queryset = User.objects.filter(create_by=request.user)
+        queryset = User.objects.all()
         data = {
-            'Les Users du User Connecter': list(queryset.values())
+            'List des Users': list(queryset.values())
         }
         return Response(data)
     
     serializer_class = UsersClientSerializer
     filter_backends = (filters.DjangoFilterBackend)
 
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+# list user for client
+class ClientUsersView(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    serializer_class = UserSerializer
+
+    def get(self, request):
+        user = request.user
+        users = User.objects.filter(the_client=user.the_client)
+        users_list = list(users.values())
+        return JsonResponse(users_list, safe=False)
+    filter_backends = (filters.DjangoFilterBackend)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+    
+# Afficher les détails d'un user
+class DetailsUser(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, id, format=None):
+        try:
+            user = User.objects.get(id=id)
+        except User.DoesNotExist:
+            data = {'message':"L'utilisateur n'existe pas"}
+            return JsonResponse(data, status=404)
+        
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
+            
+        data = {
+            'user_id': user.id,
+            'user_email': user.email,
+            'user_identifiant': user.username,
+            'user_name': user.user_name,
+            'privilege_id': user.privilege_id,
+            'country_id': user.country_id,
+            'client_id': user.client_id,
+        }
+
+        return JsonResponse(data)
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+    
 # create one user
 class CreateUsersView(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
@@ -182,17 +230,20 @@ class CreateUsersView(APIView):
         if not privilege:
             return HttpResponse("Le champ privilege est requis.")
         the_client = request.POST.get('the_client', None)
+        if not the_client:
+            return HttpResponse("Le champ the_client est requis.")
 
-        user = request.user
+        # user = request.user
+        # if not user.is_superuser:
+        #     try:
+        #         privilege_admin = Privilege.objects.get(id=1)
+        #     except Privilege.DoesNotExist:
+        #         data = {'message':"Le privilège 'admin' n'existe pas."}
+        #         return HttpResponse(data)
 
-        if not user.is_superuser:
-            try:
-                privilege_admin = Privilege.objects.get(id=5)
-            except Privilege.DoesNotExist:
-                return HttpResponse("Le privilège 'admin' n'existe pas.")
-
-            if not user.privilege == privilege_admin:
-                return HttpResponse("Vous n'avez pas le droit de créer un utilisateur.")
+        #     if not user.privilege == privilege_admin:
+        #         data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+        #         return HttpResponse(data)
 
         try:
             education = EducationLevel.objects.get(id_education=niveau_education)
@@ -217,7 +268,7 @@ class CreateUsersView(APIView):
         try:
             clientss = Clients.objects.get(id_client=the_client)
         except Clients.DoesNotExist:
-            clientss = request.user.the_client
+            return HttpResponse("Le CLient spécifié n'existe pas.")
         
         user = User(
             email=email,
@@ -234,7 +285,6 @@ class CreateUsersView(APIView):
             piece_recto=piece_recto,
             piece_verso=piece_verso,
             account_validated=True,
-            create_by = user,
             privilege = privilege,
             the_client = clientss,
             is_active=True,
@@ -249,35 +299,81 @@ class CreateUsersView(APIView):
     
     def get(self, request, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
         
 # modification des éléments d'un user
 class UpdateUserView(generics.UpdateAPIView):
     authentication_classes = [ExpiringTokenAuthentication]
     permission_classes = [IsAuthenticated]
+
     parser_classes = (MultiPartParser, FormParser, FileUploadParser)
     serializer_class = UserSerializer
     lookup_field = 'id'
     queryset = User.objects.all()
-
-    def put(self, request, *args, **kwargs):
+    
+            
+    def get_object(self, user_id):
+        try:
+            return User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            raise Http404
+        
+            
+    def put(self, request, user_id):
         user = request.user
-
         if not user.is_superuser:
             try:
-                privilege_admin = Privilege.objects.get(id=5)
+                privilege_admin = Privilege.objects.get(id=1)
             except Privilege.DoesNotExist:
-                return HttpResponse("Le privilège 'admin' n'existe pas.")
-            
-            if not user.privilege == privilege_admin:
-                return HttpResponse("Vous n'avez pas le droit de créer un utilisateur.")
-        
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
 
-        return self.partial_update(request, *args, **kwargs)
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
+            
+        user = self.get_object(user_id)
+        user.email = request.data.get('email', user.email)
+        user.nom = request.data.get('nom', user.nom)
+        user.prenoms = request.data.get('prenoms', user.prenoms)
+        country_id = request.data.get('country')
+        if country_id:
+            countries = Countries.objects.get(id_country=country_id)
+            user.country = countries
+        user.username = request.data.get('username', user.username)
+        user.password = request.data.get('password', user.password)
+        user.profile_picture = request.data.get('profile_picture', user.profile_picture)
+        client = request.data.get('the_client')
+        if client:
+            clients = Clients.objects.get(id_client=client)
+            user.the_client = clients
+        privileges = request.data.get('privilege')
+        if privileges:
+            privilegess = Privilege.objects.get(id=privileges)
+            user.privilege = privilegess
+        user.save()
+
+        data = {'message': 'Pays modifié avec succès'}
+        return JsonResponse(data)
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
     
 # delete one user
 class DeleteUserView(generics.DestroyAPIView):
     authentication_classes = [ExpiringTokenAuthentication]
     permission_classes = [IsAuthenticated]
+
     serializer_class = UserSerializer
     lookup_field = 'id'
     queryset = User.objects.all()
@@ -287,7 +383,7 @@ class DeleteUserView(generics.DestroyAPIView):
         
         if not user.is_superuser:
             try:
-                privilege_admin = Privilege.objects.get(id=5)
+                privilege_admin = Privilege.objects.get(id=1)
             except Privilege.DoesNotExist:
                 return HttpResponse("Le privilège 'admin' n'existe pas.")
             
@@ -295,6 +391,13 @@ class DeleteUserView(generics.DestroyAPIView):
                 return HttpResponse("Vous n'avez pas le droit de supprimer un utilisateur.")
         
         return self.destroy(request, *args, **kwargs)
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
     
 ######################################### CRUD Final exam section ##################################################
 # userscore crud
@@ -323,6 +426,16 @@ class UserScoreCreate(APIView):
             return HttpResponse("L'examen spécifié n'existe pas.")
         
         user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
 
         user_score_exam = UserScoreExam(
             id_exam=examen, 
@@ -330,7 +443,6 @@ class UserScoreCreate(APIView):
             score=score,
             results=results,
             nombredepoints=nombredepoints,
-            user=user
         )
         user_score_exam.save()
 
@@ -339,6 +451,13 @@ class UserScoreCreate(APIView):
     
     def get(self, request, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # userscore list
 class UserScoreList(generics.ListAPIView):
@@ -348,11 +467,19 @@ class UserScoreList(generics.ListAPIView):
     def get(self, request):
         queryset = UserScoreExam.objects.filter(user = request.user)
         data = {
-            'Scores des user': list(queryset.values())
+            'Scores des users': list(queryset.values())
         }
         return Response(data)
     serializer_class = UserScoreExamSerializer
 
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+######################################### CRUD Exam ##################################################
 # créer une question pour l'examen
 class AnswerExamCreate(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
@@ -360,6 +487,19 @@ class AnswerExamCreate(APIView):
 
     @csrf_exempt
     def post(self, request, format=None):
+
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
+            
         id_quiz_examen = request.POST.get('id_quiz_examen', None)
         if not id_quiz_examen:
             return HttpResponse("Le champ id_quiz_examen est requis.")
@@ -375,6 +515,8 @@ class AnswerExamCreate(APIView):
         except QuizExamen.DoesNotExist:
             return HttpResponse("L'examen spécifié n'existe pas.")
         
+        
+
         answer_exam = AnswersExamen(
             id_quiz_examen=quiz_examen, 
             answer_label=answer_label,
@@ -387,6 +529,13 @@ class AnswerExamCreate(APIView):
     
     def get(self, request, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # liste des questions pour l'examen
 class AnswerExamList(generics.ListAPIView):
@@ -394,12 +543,19 @@ class AnswerExamList(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        queryset = AnswersExamen.objects.filter(user = request.user)
+        queryset = AnswersExamen.objects.all()
         data = {
             'Questions des examens': list(queryset.values())
         }
         return Response(data)
     serializer_class = AnswersExamenSerializer
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # créer un user pour l'examen
 class UserExamCreate(APIView):
@@ -435,6 +591,13 @@ class UserExamCreate(APIView):
     
     def get(self, request, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # liste des user pour l'examen
 class UserExamList(generics.ListAPIView):
@@ -442,13 +605,21 @@ class UserExamList(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        queryset = UserExam.objects.filter(user = request.user)
+        queryset = UserExam.objects.all()
         data = {
             'List des participants': list(queryset.values())
         }
         return Response(data)
     serializer_class = UserExamenSerializer
 
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+######################################### CRUD Exam ##################################################
 # Créer un examen
 class ExamCreate(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
@@ -456,27 +627,34 @@ class ExamCreate(APIView):
 
     @csrf_exempt
     def post(self, request, format=None):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
+            
         id_training = request.POST.get('id_training', None)
         if not id_training:
             return HttpResponse("Le champ id_training est requis.")
-        exam_order = request.POST.get('exam_order', None)
-        if not exam_order:
-            return HttpResponse("Le champ exam_order est requis.")
         exam_name = request.POST.get('exam_name', None)
         if not exam_name:
             return HttpResponse("Le champ exam_name est requis.")
         exam_description = request.POST.get('exam_description', None)
         if not exam_description:
             return HttpResponse("Le champ exam_description est requis.")
-
         try:
             training = Training.objects.get(id_training=id_training)
         except Training.DoesNotExist:
             return HttpResponse("La formation spécifié n'existe pas.")
         
         exam = Exam(
-            id_training=training, 
-            exam_order=exam_order,
+            id_training=training,
             exam_name=exam_name,
             exam_description=exam_description,
         )
@@ -487,6 +665,13 @@ class ExamCreate(APIView):
     
     def get(self, request, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # liste des examen
 class ExamList(generics.ListAPIView):
@@ -494,13 +679,21 @@ class ExamList(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        queryset = Exam.objects.filter(user = request.user)
+        queryset = Exam.objects.all()
         data = {
             'Liste des Examens': list(queryset.values())
         }
         return Response(data)
     serializer_class = ExamSerializer
 
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+######################################### CRUD Quiz_Exam ##################################################
 # Créer un quiz pour l'examen
 class QuizExamCreate(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
@@ -508,6 +701,17 @@ class QuizExamCreate(APIView):
 
     @csrf_exempt
     def post(self, request, format=None):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         id_examen = request.POST.get('id_examen', None)
         if not id_examen:
             return HttpResponse("Le champ id_examen est requis.")
@@ -547,6 +751,13 @@ class QuizExamCreate(APIView):
     
     def get(self, request, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # liste des quizExamen
 class QuizExamList(generics.ListAPIView):
@@ -554,12 +765,101 @@ class QuizExamList(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        queryset = QuizExamen.objects.filter(user = request.user)
+        queryset = Exam.objects.prefetch_related(
+            Prefetch('quizexamen_set', queryset=QuizExamen.objects.prefetch_related('answersexamen_set'))
+        )
         data = {
-            'La liste des Quizs pour examen': list(queryset.values())
+            'La liste des Examens avec le nombre de quiz questions et les questions avec les réponses': [
+                {
+                    'examen': exam.exam_name,
+                    'nombre_questions': exam.quizexamen_set.count(),
+                    'questions': [
+                        {
+                            'question': question.quiz_question_name,
+                            'points': question.quiz_question_points,
+                            'type': question.quiz_question_type,
+                            'media': question.quiz_question_media.url,
+                            'description': question.quiz_description,
+                            'reponses': [
+                                {
+                                    'label': answer.answer_label,
+                                    'correct': answer.answer_correct
+                                } for answer in question.answersexamen_set.all()
+                            ]
+                        } for question in exam.quizexamen_set.all()
+                    ]
+                } for exam in queryset
+            ]
         }
         return Response(data)
-    serializer_class = QuizExamenSerializer
+
+
+    # def handle_exception(self, exc):
+    #     data = {}
+    #     if isinstance(exc, AuthenticationFailed):
+    #         data['token_status'] = 'Token Invalide'
+    #         return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+    #     return super().handle_exception(exc)
+
+# modifier un quizexam
+class ModifierQuizExam(generics.UpdateAPIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self, exam_id, quiz_id):
+        try:
+            quiz = QuizExamen.objects.select_related('id_examen').get(id_quiz_examen=quiz_id, id_examen__id_exam=exam_id)
+            return quiz
+        except QuizExamen.DoesNotExist:
+            raise Http404
+
+    def update(self, request, exam_id, quiz_id):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
+        quiz = self.get_object(exam_id, quiz_id)
+        quiz.quiz_question_name = request.data.get('quiz_question_name', quiz.quiz_question_name)
+        quiz.quiz_question_points = request.data.get('quiz_question_points', quiz.quiz_question_points)
+        quiz.quiz_question_type = request.data.get('quiz_question_type', quiz.quiz_question_type)
+        quiz.quiz_question_media = request.data.get('quiz_question_media', quiz.quiz_question_media)
+        quiz.quiz_description = request.data.get('quiz_description', quiz.quiz_description)
+        quiz.save()
+
+        for answer in quiz.answersexamen_set.all():
+            answer_id = str(answer.id_answer_examen)
+            answer_label = request.data.get(f'answer_label_{answer_id}', answer.answer_label)
+            answer_correct = request.data.get(f'answer_correct_{answer_id}', answer.answer_correct)
+            answer.answer_label = answer_label
+            answer.answer_correct = answer_correct
+            answer.save()
+
+        data = {
+            'message': 'Le quiz et ses réponses ont été modifiés avec succès',
+            'quiz': {
+                'id_quiz_examen': quiz.id_quiz_examen,
+                'quiz_question_name': quiz.quiz_question_name,
+                'quiz_question_points': quiz.quiz_question_points,
+                'quiz_question_type': quiz.quiz_question_type,
+                'quiz_question_media': quiz.quiz_question_media.url if quiz.quiz_question_media else None,
+                'quiz_description': quiz.quiz_description,
+                'answers': [
+                    {
+                        'id_answer_examen': answer.id_answer_examen,
+                        'answer_label': answer.answer_label,
+                        'answer_correct': answer.answer_correct,
+                    } for answer in quiz.answersexamen_set.all()
+                ]
+            }
+        }
+        return Response(data)
 
 ######################################### CRUD answers section ##################################################
 # Créer un quiz pour la section
@@ -569,6 +869,17 @@ class AnswerSectionCreate(APIView):
 
     @csrf_exempt
     def post(self, request, format=None):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         id_quiz = request.POST.get('id_quiz', None)
         if not id_quiz:
             return HttpResponse("Le champ id_quiz est requis.")
@@ -596,6 +907,13 @@ class AnswerSectionCreate(APIView):
     
     def get(self, request, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # liste des quiz pour la section
 class AnswerSectionList(generics.ListAPIView):
@@ -603,12 +921,19 @@ class AnswerSectionList(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        queryset = Sections.objects.filter(user = request.user)
+        queryset = AnswersSection.objects.all()
         data = {
             'Answer for Section': list(queryset.values())
         }
         return Response(data)
     serializer_class = SectionsSerializer
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 ######################################### CRUD quiz section ##################################################
 # Créer un quiz pour la section
@@ -618,6 +943,17 @@ class QuizSectionCreate(APIView):
 
     @csrf_exempt
     def post(self, request, format=None):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         id_section = request.POST.get('id_section', None)
         if not id_section:
             return HttpResponse("Le champ id_section est requis.")
@@ -637,7 +973,7 @@ class QuizSectionCreate(APIView):
         if not quiz_description:
             return HttpResponse("Le champ quiz_description est requis.")
 
-        user = request.user
+        # user = request.user
         
         try:
             section = Sections.objects.get(id_section=id_section)
@@ -651,7 +987,7 @@ class QuizSectionCreate(APIView):
             quiz_question_type=quiz_question_type,
             quiz_question_media=quiz_question_media,
             quiz_description=quiz_description,
-            user=user
+            # user=user
         )
         quiz_section.save()
 
@@ -660,9 +996,16 @@ class QuizSectionCreate(APIView):
     
     def get(self, request, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # modifier un quiz
-class ModifierQuiz(APIView):
+class ModifierSectionQuiz(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
@@ -674,13 +1017,23 @@ class ModifierQuiz(APIView):
 
     def put(self, request, quiz_section_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de modifier des footsoldiers
-        if not user.has_perm('votreapp.change_quiz_section'):
-            return HttpResponse("Vous n'avez pas le droit de modifier un quiz pour la session.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
 
         quiz_section = self.get_object(quiz_section_id)
 
-        quiz_section.id_section = request.data.get('id_section', quiz_section.id_section)
+        section_quiz = request.data.get('id_section')
+        if section_quiz:
+            sections = Sections.objects.get(id_section=section_quiz)
+            quiz_section.id_section = sections
         quiz_section.quiz_question_name = request.data.get('quiz_question_name', quiz_section.quiz_question_name)
         quiz_section.quiz_question_points = request.data.get('quiz_question_points', quiz_section.quiz_question_points)
         quiz_section.quiz_question_type = request.data.get('quiz_question_type', quiz_section.quiz_question_type)
@@ -694,18 +1047,32 @@ class ModifierQuiz(APIView):
     def get(self, request, countrie_id, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
     
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+    
 # liste des quizs
-class QuizList(generics.ListAPIView):
+class QuizSectionList(generics.ListAPIView):
     authentication_classes = [ExpiringTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        queryset = QuizSection.objects.filter(user = request.user)
+        queryset = QuizSection.objects.all()
         data = {
             'Quizs': list(queryset.values())
         }
         return Response(data)
     serializer_class = QuizSectionSerializer
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 ######################################### CRUD chapter ##################################################
 # Créer une chapter
@@ -715,12 +1082,20 @@ class ChapterCreate(APIView):
 
     @csrf_exempt
     def post(self, request, format=None):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         id_section = request.POST.get('id_section', None)
         if not id_section:
             return HttpResponse("Le champ id_section est requis.")
-        chapter_order = request.POST.get('chapter_order', None)
-        if not chapter_order:
-            return HttpResponse("Le champ chapter_order est requis.")
         chapter_name = request.POST.get('chapter_name', None)
         if not chapter_name:
             return HttpResponse("Le champ chapter_name est requis.")
@@ -728,7 +1103,7 @@ class ChapterCreate(APIView):
         if not chapter_description:
             return HttpResponse("Le champ chapter_description est requis.")
 
-        user = request.user
+        # user = request.user
         
         try:
             section = Sections.objects.get(id_section=id_section)
@@ -737,10 +1112,10 @@ class ChapterCreate(APIView):
         
         chapters = Chapters(
             id_section=section, 
-            chapter_order=chapter_order,
+            # chapter_order=chapter_order,
             chapter_name=chapter_name,
             chapter_description=chapter_description,
-            user=user
+            # user=user
         )
         chapters.save()
 
@@ -749,14 +1124,33 @@ class ChapterCreate(APIView):
     
     def get(self, request, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # liste des chapters
 class ChapterList(generics.ListAPIView):
     authentication_classes = [ExpiringTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
-    queryset = Chapters.objects.all()
+    def get(self, request):
+        queryset = Chapters.objects.all()
+        data = {
+            'Chapitres': list(queryset.values())
+        }
+        return Response(data)
     serializer_class = ChaptersSerializer
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # modifier une section
 class ModifierChapter(APIView):
@@ -771,14 +1165,23 @@ class ModifierChapter(APIView):
 
     def put(self, request, chapter_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de modifier des footsoldiers
-        if not user.has_perm('votreapp.change_chapter'):
-            return HttpResponse("Vous n'avez pas le droit de modifier un chapter.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
 
         chapters = self.get_object(chapter_id)
 
-        chapters.id_section = request.data.get('id_section', chapters.id_section)
-        chapters.chapter_order = request.data.get('chapter_order', chapters.chapter_order)
+        section = request.data.get('id_section')
+        if section:
+            sections = Sections.objects.get(id_section=section)
+            chapters.id_section = sections
         chapters.chapter_name = request.data.get('chapter_name', chapters.chapter_name)
         chapters.chapter_description = request.data.get('chapter_description', chapters.chapter_description)
         chapters.save()
@@ -788,22 +1191,44 @@ class ModifierChapter(APIView):
 
     def get(self, request, countrie_id, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
     
 # supprimer un training
 class DeleteChapter(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def delete(self, request, chapter_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de supprimer des footsoldiers
-        if not user.has_perm('votreapp.delete_chapter'):
-            return HttpResponse("Vous n'avez pas le droit de supprimer une chapitre.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
 
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         chapter = self.get_Training(chapter_id)
 
         chapter.delete()
 
         data = {'message': 'Chapitre supprimé avec succès.'}
         return JsonResponse(data)
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 ######################################### CRUD section ##################################################
 # Créer une section
@@ -813,6 +1238,17 @@ class SectionCreate(APIView):
 
     @csrf_exempt
     def post(self, request, format=None):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         id_formation = request.POST.get('id_formation', None)
         if not id_formation:
             return HttpResponse("Le champ id_formation est requis.")
@@ -823,43 +1259,73 @@ class SectionCreate(APIView):
         if not sections_name:
             return HttpResponse("Le champ sections_name est requis.")
         
-        user = request.user
-        
         try:
             training = Training.objects.get(id_training=id_formation)
-        except Clients.DoesNotExist:
+        except Training.DoesNotExist:
             return HttpResponse("La Formation spécifié n'existe pas.")
         
         try:
             produit = Produit.objects.get(id_product=sections_order)
-        except Clients.DoesNotExist:
+        except Produit.DoesNotExist:
             return HttpResponse("Le Produit spécifié n'existe pas.")
         
         sections = Sections(
             sections_name=sections_name, 
             id_formation=training,
-            sections_order=produit,
-            user=user
+            sections_order=produit
         )
         sections.save()
 
         data = {'message': 'Section ajouté avec succès'}
         return JsonResponse(data)
-    
     def get(self, request, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
     
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+    
 # liste des sections
-class SectionList(generics.ListAPIView):
+class SectionList(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
     permission_classes = [IsAuthenticated]
-    def get(sel, request):
-        queryset = Sections.objects.filter(user=request.user)
-        data = {
-            'Sections': list(queryset.values())
-        }
-        return Response(data)
+
     serializer_class = SectionsSerializer
+
+    def get_queryset(self):
+        queryset = Sections.objects.all()
+        return queryset
+
+    def list(self, request):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        data = serializer.data
+
+        for section in data:
+            chapter_queryset = Chapters.objects.filter(id_section=section['id_section'])
+            chapter_serializer = ChaptersSerializer(chapter_queryset, many=True)
+            section['chapters'] = chapter_serializer.data
+
+            quiz_queryset = QuizSection.objects.filter(id_section=section['id_section'])
+            quiz_serializer = QuizSectionSerializer(quiz_queryset, many=True)
+            section['quizzes'] = quiz_serializer.data
+
+            for quiz in section['quizzes']:
+                answer_queryset = AnswersSection.objects.filter(id_quiz=quiz['id_quiz_section'])
+                answer_serializer = AnswersSectionSerializer(answer_queryset, many=True)
+                quiz['answers'] = answer_serializer.data
+        return Response(data)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # modifier une section
 class ModifierSection(APIView):
@@ -874,14 +1340,27 @@ class ModifierSection(APIView):
 
     def put(self, request, section_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de modifier des footsoldiers
-        if not user.has_perm('votreapp.change_section'):
-            return HttpResponse("Vous n'avez pas le droit de modifier une section.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
 
         section = self.get_object(section_id)
 
-        section.id_formation = request.data.get('id_formation', section.id_formation)
-        section.sections_order = request.data.get('sections_order', section.sections_order)
+        training = request.data.get('id_formation')
+        if training:
+            trainings = Training.objects.get(id_training=training)
+            section.id_formation = trainings
+        produit = request.data.get('sections_order')
+        if produit:
+            produits = Produit.objects.get(id_product=produit)
+            section.sections_order = produits
         section.sections_name = request.data.get('sections_name', section.sections_name)
         section.save()
 
@@ -890,22 +1369,44 @@ class ModifierSection(APIView):
 
     def get(self, request, countrie_id, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # supprimer un training
 class DeleteSection(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def delete(self, request, section_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de supprimer des footsoldiers
-        if not user.has_perm('votreapp.delete_section'):
-            return HttpResponse("Vous n'avez pas le droit de supprimer une Section.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
 
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         section = self.get_Training(section_id)
 
         section.delete()
 
         data = {'message': 'Section supprimé avec succès.'}
         return JsonResponse(data)
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
     
 ######################################### CRUD training ##################################################
 # liste des training
@@ -914,12 +1415,19 @@ class TrainingList(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        queryset = Training.objects.filter(user=request.user)
+        queryset = Training.objects.all()
         data = {
             'Formations': list(queryset.values()),
         }
         return Response(data)
     serializer_class = TrainingSerializer
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # Créer un training
 class TrainingCreate(APIView):
@@ -928,6 +1436,17 @@ class TrainingCreate(APIView):
 
     @csrf_exempt
     def post(self, request, format=None):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         id_client = request.POST.get('id_client', None)
         if not id_client:
             return HttpResponse("Le champ id_client est requis.")
@@ -959,7 +1478,7 @@ class TrainingCreate(APIView):
         if not training_category:
             return HttpResponse("Le champ training_category est requis.")
         
-        user = request.user
+        # user = request.user
         
         try:
             client = Clients.objects.get(id_client=id_client)
@@ -968,7 +1487,7 @@ class TrainingCreate(APIView):
         
         try:
             produit = Produit.objects.get(id_product=produit_id)
-        except Clients.DoesNotExist:
+        except Produit.DoesNotExist:
             return HttpResponse("Le Produit spécifié n'existe pas.")
         
         try:
@@ -987,7 +1506,7 @@ class TrainingCreate(APIView):
             training_mode=training_mode,
             training_statut=training_statut,
             training_category=training_category,
-            user=user
+            # user=user
         )
         training.save()
 
@@ -996,22 +1515,44 @@ class TrainingCreate(APIView):
     
     def get(self, request, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
     
 # supprimer un training
 class DeleteTraining(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def delete(self, request, training_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de supprimer des footsoldiers
-        if not user.has_perm('votreapp.delete_training'):
-            return HttpResponse("Vous n'avez pas le droit de supprimer un Training.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
 
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         training = self.get_Training(training_id)
 
         training.delete()
 
         data = {'message': 'Training supprimé avec succès.'}
         return JsonResponse(data)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # modifier un training
 class ModifierTraining(APIView):
@@ -1026,17 +1567,32 @@ class ModifierTraining(APIView):
 
     def put(self, request, training_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de modifier des footsoldiers
-        if not user.has_perm('votreapp.change_training'):
-            return HttpResponse("Vous n'avez pas le droit de modifier un training.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
 
         training = self.get_object(training_id)
 
-        training.countrie_id = request.data.get('countrie_id', training.countrie_id)
+        country_id = request.data.get('countrie_id')
+        if country_id:
+            country = Countries.objects.get(id_country=country_id)
+            training.countrie_id = country
         training.training_name = request.data.get('training_name', training.training_name)
-        training.id_client = request.data.get('id_client', training.id_client)
-        training.produit_id = request.data.get('produit_id', training.produit_id)
-        training.id_client = request.data.get('id_client', training.id_client)
+        client_id = request.data.get('id_client')
+        if client_id:
+            client = Clients.objects.get(id_client=client_id)
+            training.id_client = client
+        produit = request.data.get('produit_id')
+        if produit:
+            produits = Produit.objects.get(id_product=produit)
+            training.produit_id = produits
         training.training_onBoarding = request.data.get('training_onBoarding', training.training_onBoarding)
         training.training_min_score = request.data.get('training_min_score', training.training_min_score)
         training.training_description = request.data.get('training_description', training.training_description)
@@ -1045,12 +1601,87 @@ class ModifierTraining(APIView):
         training.training_category = request.data.get('training_category', training.training_category)
         training.save()
 
-        data = {'message': 'Training modifié avec succès'}
+        training_serializer = TrainingSerializer(training)
+        data = {
+            'formations':training_serializer.data,
+            'message': 'Formation modifié avec succès'
+        }
         return JsonResponse(data)
 
     def get(self, request, countrie_id, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
 
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+######################################## settings_privilege CRUD ################################################
+# Ajouter un nouveau settings_privilege
+class AjouterPrivilege(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @csrf_exempt
+    def post(self, request, format=None):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
+        name = request.POST.get('name', None)
+        if not name:
+            return HttpResponse("Le champ name est requis.")
+        description = request.POST.get('description', None)
+        if not description:
+            return HttpResponse("Le champ description est requis.")
+
+        privilege = Privilege(
+            name=name, 
+            description=description,
+        )
+        privilege.save()
+
+        data = {'message': 'Privilege ajouté avec succès'}
+        return JsonResponse(data)
+
+    def get(self, request, format=None):
+        return JsonResponse({'error': 'Méthode non autorisée'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+# list des privilèges
+class ListePrivilege(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        privilege = Privilege.objects.all()
+        data = {
+            'Privilèges': list(privilege.values()),
+        }
+        return Response(data)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+      
 ######################################## settings_typeID CRUD ################################################
 # Ajouter un nouveau settings_typeID
 class AjouterTypeId(APIView):
@@ -1059,17 +1690,23 @@ class AjouterTypeId(APIView):
 
     @csrf_exempt
     def post(self, request, format=None):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         id_name = request.POST.get('id_name', None)
         if not id_name:
             return HttpResponse("Le champ id_name est requis.")
         id_country = request.POST.get('id_country', None)
         if not id_country:
             return HttpResponse("Le champ id_country est requis.")
-        number_typeid = request.POST.get('number_typeid', None)
-        if not number_typeid:
-            return HttpResponse("Le champ number_typeid est requis.")
-        
-        user = request.user
         
         try:
             country = Countries.objects.get(id_country=id_country)
@@ -1078,9 +1715,7 @@ class AjouterTypeId(APIView):
         
         type_id = TypeID(
             id_name=id_name, 
-            id_country=country,
-            number_typeid=number_typeid,
-            user=user
+            id_country=country
         )
         type_id.save()
 
@@ -1089,6 +1724,13 @@ class AjouterTypeId(APIView):
 
     def get(self, request, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
     
 # modifier un settings_typeID
 class ModifierTypeId(APIView):
@@ -1100,35 +1742,62 @@ class ModifierTypeId(APIView):
             return TypeID.objects.get(id_type=type_id)
         except TypeID.DoesNotExist:
             raise Http404
-
+        
     def put(self, request, type_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de modifier des footsoldiers
-        if not user.has_perm('votreapp.change_typeID'):
-            return HttpResponse("Vous n'avez pas le droit de modifier des typeID.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
 
-        typeId = self.get_object(type_id)
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
+        type = self.get_object(type_id)
+        type.id_name = request.data.get('id_name', type.id_name)
+        
+        # récupérer l'objet Countries correspondant à partir de son ID et l'assigner au champ id_country
+        country_id = request.data.get('id_country')
+        if country_id:
+            country = Countries.objects.get(id_country=country_id)
+            type.id_country = country
+        
+        type.save()
 
-        typeId.id_country = request.data.get('id_country', typeId.id_country)
-        typeId.id_name = request.data.get('id_name', typeId.id_name)
-        typeId.number_typeid = request.data.get('number_typeid', typeId.number_typeid)
-        typeId.save()
-
-        data = {'message': 'Education Level modifié avec succès'}
+        data = {'message': 'TypeID modifié avec succès'}
         return JsonResponse(data)
 
-    def get(self, request, id_country, format=None):
-        return JsonResponse({'error': 'Méthode non autorisée'})
+    def get(self, request, *args, **kwargs):
+        # retourne un message d'erreur indiquant que cette vue ne prend pas en charge les requêtes GET
+        data = {'error': 'Cette vue ne prend pas en charge les requêtes GET.'}
+        return JsonResponse(data)
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # supprimer un settings_typeID
 class DeleteTypeId(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def delete(self, request, type_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de supprimer des footsoldiers
-        if not user.has_perm('votreapp.delete_typeId'):
-            return HttpResponse("Vous n'avez pas le droit de supprimer des typeId.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
 
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         typeid = self.get_typeId(type_id)
 
         typeid.delete()
@@ -1136,19 +1805,31 @@ class DeleteTypeId(APIView):
         data = {'message': 'typeID supprimé avec succès.'}
         return JsonResponse(data)
     
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+    
 # list des settings_typeID
 class ListeTypeId(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        typeId = TypeID.objects.filter(user=request.user)
-        total_typeid = typeId.aggregate(Sum('number_typeid'))['number_typeid__sum']
-        data = {
-            'Pays': list(typeId.values()),
-            'Total_typeid': total_typeid
-        }
+        counts_by_country = TypeID.objects.values('id_country__country_name').annotate(count=Count('id_country'))
+        data = {}
+        for count in counts_by_country:
+            data[count['id_country__country_name']] = count['count']
         return Response(data)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
       
 ######################################## settings_levef_of_study CRUD ################################################
 # Ajouter un nouveau settings_level
@@ -1158,36 +1839,47 @@ class AjouterEducationLevel(APIView):
 
     @csrf_exempt
     def post(self, request, format=None):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         level_name = request.POST.get('level_name', None)
         if not level_name:
             return HttpResponse("Le champ level_name est requis.")
-        country_id = request.POST.get('country_id', None)
-        if not country_id:
-            return HttpResponse("Le champ country_id est requis.")
-        level_number = request.POST.get('level_number', None)
-        if not level_number:
-            return HttpResponse("Le champ level_number est requis.")
-        
-        user = request.user
+        id_country = request.POST.get('id_country', None)
+        if not id_country:
+            return HttpResponse("Le champ id_country est requis.")
         
         try:
-            country = Countries.objects.get(id_country=country_id)
+            country = Countries.objects.get(id_country=id_country)
         except Countries.DoesNotExist:
-            return HttpResponse("Le pays spécifié n'existe pas.")
+            return HttpResponse("Le TypeID spécifié n'existe pas.")
         
-        education_level = EducationLevel(
+        level_education = EducationLevel(
             level_name=level_name, 
-            id_country=country,
-            level_number=level_number,
-            user=user
+            id_country=country
         )
-        education_level.save()
+        level_education.save()
 
-        data = {'message': 'Education Level ajouté avec succès'}
+        data = {'message': 'TypeID ajouté avec succès'}
         return JsonResponse(data)
 
     def get(self, request, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
     
 # modifier un settings_level
 class ModifierEducationLevel(APIView):
@@ -1202,15 +1894,25 @@ class ModifierEducationLevel(APIView):
 
     def put(self, request, education_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de modifier des footsoldiers
-        if not user.has_perm('votreapp.change_educationLevel'):
-            return HttpResponse("Vous n'avez pas le droit de modifier des educationLevel.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
 
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         education = self.get_object(education_id)
-
-        education.id_country = request.data.get('id_country', education.id_country)
         education.level_name = request.data.get('level_name', education.level_name)
-        education.level_number = request.data.get('level_number', education.level_number)
+
+        # récupérer l'objet Countries correspondant à partir de son ID et l'assigner au champ id_country
+        country_id = request.data.get('id_country')
+        if country_id:
+            country = Countries.objects.get(id_country=country_id)
+            education.id_country = country
+
         education.save()
 
         data = {'message': 'Education Level modifié avec succès'}
@@ -1218,16 +1920,29 @@ class ModifierEducationLevel(APIView):
 
     def get(self, request, id_country, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # supprimer un settings_level
 class DeleteEducationLevel(APIView):
 
     def delete(self, request, education_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de supprimer des footsoldiers
-        if not user.has_perm('votreapp.delete_educationLevel'):
-            return HttpResponse("Vous n'avez pas le droit de supprimer des educationLevel.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
 
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         education = self.get_educationLevel(education_id)
 
         education.delete()
@@ -1235,19 +1950,44 @@ class DeleteEducationLevel(APIView):
         data = {'message': 'educationLevel supprimé avec succès.'}
         return JsonResponse(data)
     
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+    
 # list des settings_level
 class ListeEducationLevel(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        education = EducationLevel.objects.filter(user=request.user)
-        total_level = education.aggregate(Sum('level_number'))['level_number__sum']
-        data = {
-            'EducationLevel': list(education.values()),
-            'Total_level': total_level
-        }
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
+        counts_by_country = EducationLevel.objects.values('id_country__country_name').annotate(count=Count('id_country'))
+        count_list = [count['count'] for count in counts_by_country]
+        total_level = sum(count_list)
+        data = {'Total_level': total_level}
+        for count in counts_by_country:
+            data[count['id_country__country_name']] = count['count']
         return Response(data)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
       
 ######################################## settings_countries CRUD ################################################
 # Ajouter un nouveau settings_countries
@@ -1257,6 +1997,17 @@ class AjouterCountries(APIView):
 
     @csrf_exempt
     def post(self, request, format=None):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         country_name = request.data.get('country_name', None)
         if not country_name:
             return HttpResponse("Le champ country_name est requis.", status=400)
@@ -1266,35 +2017,75 @@ class AjouterCountries(APIView):
         flag = request.data.get('flag', None)
         if not flag:
             return HttpResponse("Le champ flag est requis.", status=400)
-        number_clients = request.data.get('number_clients', None)
-        if not number_clients:
-            return HttpResponse("Le champ number_clients est requis.", status=400)
-
-        user = request.user
 
         countries = Countries(country_name=country_name,
-                            country_prefixe=country_prefixe,
-                            flag=flag,
-                            number_clients=number_clients,
-                            user=user)
+                              country_prefixe=country_prefixe,
+                              flag=flag)
         countries.save()
 
-        data = {'message': 'Countries ajouté avec succès'}
+        # Mettre à jour le nombre de clients associés à ce pays
+        num_clients = Clients.objects.filter(country_id=countries).count()
+        countries.numbers_of_clients = num_clients
+        countries.save()
+
+        data = {'message': 'Countries ajouté avec succès',
+                'number_of_clients': num_clients}
         return JsonResponse(data)
     
-# Lister tous les settings countrie
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+    
+# Afficher les détails d'un countries
+class DetailsCountries(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, country_id, format=None):
+        try:
+            countries = Countries.objects.get(id_country=country_id)
+        except Countries.DoesNotExist:
+            data = {'message':"Le pays n'existe pas"}
+            return JsonResponse(data, status=404)
+            
+        data = {
+            'country_name': countries.country_name,
+            'country_prefixe': countries.country_prefixe,
+            'country_name': countries.country_name,
+            'flag': request.build_absolute_uri(countries.flag.url),
+            'numbers_of_clients': countries.numbers_of_clients,
+        }
+
+        return Response(data)
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+    
+# Lister des countries
 class ListeCountries(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        countries = Countries.objects.filter(user=request.user)
-        total_clients = countries.aggregate(Sum('number_clients'))['number_clients__sum']
+        countries = Countries.objects.all()
         data = {
-            'Pays': list(countries.values()),
-            'Total_clients': total_clients
+            'Pays': list(countries.values())
         }
         return Response(data)
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
     
 # modifier un countrie_setting
 class ModifierCountries(APIView):
@@ -1309,16 +2100,20 @@ class ModifierCountries(APIView):
 
     def put(self, request, country_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de modifier des footsoldiers
-        if not user.has_perm('votreapp.change_countrie'):
-            return HttpResponse("Vous n'avez pas le droit de modifier des pays.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
 
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         countries = self.get_object(country_id)
-
         countries.country_name = request.data.get('country_name', countries.country_name)
         countries.country_prefixe = request.data.get('country_prefixe', countries.country_prefixe)
         countries.flag = request.data.get('flag', countries.flag)
-        countries.number_clients = request.data.get('number_clients', countries.number_clients)
         countries.save()
 
         data = {'message': 'Pays modifié avec succès'}
@@ -1326,22 +2121,44 @@ class ModifierCountries(APIView):
 
     def get(self, request, id_country, format=None):
         return JsonResponse({'error': 'Méthode non autorisée'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # Supprimer un countries existant
 class DeleteCountriesView(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def delete(self, request, country_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de supprimer des footsoldiers
-        if not user.has_perm('votreapp.delete_footsoldiers'):
-            return HttpResponse("Vous n'avez pas le droit de supprimer des footsoldiers.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
 
         countries = self.get_kyc(country_id)
-
         countries.delete()
 
         data = {'message': 'Pays supprimé avec succès.'}
         return JsonResponse(data)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
     
 ######################################## pos CRUD ################################################
 # affichage des Pos
@@ -1350,7 +2167,8 @@ class ListPosView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        pos = Pos.objects.filter(user=request.user)
+
+        pos = Pos.objects.filter()
         # récupérer tous les objets Pos
         total_pos_active = pos.aggregate(Sum('pos_active'))['pos_active__sum']
         total_numb_pos = pos.aggregate(Sum('numb_pos'))['numb_pos__sum']
@@ -1367,6 +2185,42 @@ class ListPosView(APIView):
         'total_pos_indication': total_pos_indication
     })
 
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+# pos for client
+class ClientPosView(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        user = request.user
+        client_id = user.the_client.id_client
+        pos = Pos.objects.filter(pos_client=client_id).values()
+        pos_list = list(pos.values())
+        # récupérer tous les objets Pos
+        total_pos_active = pos.aggregate(Sum('pos_active'))['pos_active__sum']
+        total_numb_pos = pos.aggregate(Sum('numb_pos'))['numb_pos__sum']
+        total_pos_indication = pos.aggregate(Sum('pos_indication'))['pos_indication__sum']
+
+        return Response({
+        'Pos': pos_list,
+        'total_pos_active': total_pos_active,
+        'total_numb_pos': total_numb_pos,
+        'total_pos_indication': total_pos_indication
+    })
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
 # ajout d'un POS
 class CreatePosView(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
@@ -1374,7 +2228,16 @@ class CreatePosView(APIView):
 
     def post(self, request):
         user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
 
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         file = request.FILES.get('file')
         pos_countrie = request.data.get('pos_countrie')
         pos_client = request.data.get('pos_client')
@@ -1409,14 +2272,20 @@ class CreatePosView(APIView):
                         pos_lat=pos_lat,
                         pos_active=row['pos_active'],
                         numb_pos=row['numb_pos'],
-                        pos_indication=row['pos_indication'],
-                        user=user
+                        pos_indication=row['pos_indication']
                     )
                     pos.save()
 
             return Response({'success': f'Données importées avec succès depuis le fichier "{sheet_name}"'})
         except Exception as e:
             return Response({'error': str(e)})
+        
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 ######################################## target CRUD ################################################
 # ajout d'un target
@@ -1427,6 +2296,16 @@ class AjouterTargetView(APIView):
 
     def post(self, request, format=None):
         user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         file = request.FILES.get('file')
         target_countrie = request.data.get('target_countrie')
         target_client = request.data.get('target_client')
@@ -1458,14 +2337,19 @@ class AjouterTargetView(APIView):
                         target_month=target_month,
                         target_moderm=row['target_moderm'],
                         target_routeurs=row['target_routeurs'],
-                        target_airtelmoney=row['target_airtelmoney'],
-                        user=user
+                        target_airtelmoney=row['target_airtelmoney']
                     )
                     target.save()
 
             return Response({'success': f'Données importées avec succès depuis le fichier "{sheet_name}"'})
         except Exception as e:
             return Response({'error': str(e)})
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # affichage de tous les targets
 class TargetListView(APIView):
@@ -1473,8 +2357,8 @@ class TargetListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        targets = Target.objects.filter(user=request.user)
-        # récupérer tous les objets Pos
+        targets = Target.objects.all()
+        # récupérer tous les objets Targets
         total_target_moderm = targets.aggregate(Sum('target_moderm'))['target_moderm__sum']
         total_target_routeurs = targets.aggregate(Sum('target_routeurs'))['target_routeurs__sum']
         total_target_airtelmoney = targets.aggregate(Sum('target_airtelmoney'))['target_airtelmoney__sum']
@@ -1486,7 +2370,44 @@ class TargetListView(APIView):
         'total_target_moderm': total_target_moderm,
         'total_target_routeurs': total_target_routeurs,
         'total_target_airtelmoney': total_target_airtelmoney
-    })
+        })
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+# target for client view
+class ClientTargetsView(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    serializer_class = TargetSerializer
+
+    def get(self, request):
+        user = request.user
+        targets = Target.objects.filter(target_client=user.the_client)
+        targets_list = list(targets.values())
+        # récupérer tous les objets Targets
+        total_target_moderm = targets.aggregate(Sum('target_moderm'))['target_moderm__sum']
+        total_target_routeurs = targets.aggregate(Sum('target_routeurs'))['target_routeurs__sum']
+        total_target_airtelmoney = targets.aggregate(Sum('target_airtelmoney'))['target_airtelmoney__sum']
+
+        return Response({
+        'targets': targets_list,
+        'total_target_moderm': total_target_moderm,
+        'total_target_routeurs': total_target_routeurs,
+        'total_target_airtelmoney': total_target_airtelmoney
+        })
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 class ModifierTarget(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
@@ -1494,10 +2415,17 @@ class ModifierTarget(APIView):
 
     def put(self, request, target_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de modifier des footsoldiers
-        if not user.has_perm('votreapp.change_target'):
-            return HttpResponse("Vous n'avez pas le droit de modifier des targets.", status=403)
-        
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
+
         try:
             target = Target.objects.get(id_target=target_id)
         except Target.DoesNotExist:
@@ -1512,19 +2440,43 @@ class ModifierTarget(APIView):
         target.target_airtelmoney = request.data.get('target_airtelmoney', target.target_airtelmoney)
         target.save()
 
-        return Response({'success': 'Target modifiée avec succès'}, status=status.HTTP_200_OK)
+        return Response({'message': 'Target modifiée avec succès'}, status=status.HTTP_200_OK)
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 class SupprimerTarget(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def delete(self, request, target_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de supprimer des footsoldiers
-        if not user.has_perm('votreapp.delete_footsoldiers'):
-            return HttpResponse("Vous n'avez pas le droit de supprimer des footsoldiers.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
 
         target = Target.objects.get(id_target=target_id)
         target.delete()
 
-        return Response({'success': 'Target supprimée avec succès'})
+        return Response({'message': 'Target supprimée avec succès'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
     
 ######################################## KYC CRUD ###################################################
 # Ajouter un nouveau KYC
@@ -1533,9 +2485,17 @@ class AjouterKYCView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        createdAt = request.data.get('createdAt', None)
-        if not createdAt:
-            return HttpResponse("Le champ createdAt est requis.", status=400)
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         prenoms = request.data.get('prenoms', None)
         if not prenoms:
             return HttpResponse("Le champ prenoms est requis.", status=400)
@@ -1552,19 +2512,22 @@ class AjouterKYCView(APIView):
         if not country_kyc_id:
             return HttpResponse("Le champ country_kyc_id est requis.", status=400)
 
-        user = request.user
-
-        kyc = Kyc(createdAt=createdAt,
-                  prenoms=prenoms,
+        kyc = Kyc(prenoms=prenoms,
                   nom=nom,
                   country_kyc_id=country_kyc_id,
                   clients_kyc_id=clients_kyc_id,
-                  username=username,
-                  user=user)
+                  username=username)
         kyc.save()
 
         data = {'message': 'KYC ajouté avec succès'}
         return JsonResponse(data)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # Lister tous les KYC
 class ListeKYC(APIView):
@@ -1572,9 +2535,17 @@ class ListeKYC(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):        
-        kycs = Kyc.objects.filter(user=request.user)
+
+        kycs = Kyc.objects.all()
         data = {'Kyc': list(kycs.values())}
         return Response(data)
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
     
 # Mettre à jour un kyc existant
 class UpdateKYCView(APIView):
@@ -1589,10 +2560,16 @@ class UpdateKYCView(APIView):
 
     def put(self, request, kyc_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de modifier des footsoldiers
-        if not user.has_perm('votreapp.change_footsoldiers'):
-            return HttpResponse("Vous n'avez pas le droit de modifier des footsoldiers.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
 
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         kyc = self.get_object(kyc_id)
 
         kyc.createdAt = request.data.get('createdAt', kyc.createdAt)
@@ -1605,14 +2582,30 @@ class UpdateKYCView(APIView):
         data = {'message': 'KYC modifié avec succès'}
         return JsonResponse(data)
     
+    # def handle_exception(self, exc):
+    #     data = {}
+    #     if isinstance(exc, AuthenticationFailed):
+    #         data['token_status'] = 'Token Invalide'
+    #         return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+    #     return super().handle_exception(exc)
+    
 # Supprimer un produit existant
 class DeleteKycView(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def delete(self, request, kyc_id):
         user = request.user
-        # Vérification que l'utilisateur connecté a bien le droit de supprimer des footsoldiers
-        if not user.has_perm('votreapp.delete_footsoldiers'):
-            return HttpResponse("Vous n'avez pas le droit de supprimer des footsoldiers.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
 
         kyc = self.get_kyc(kyc_id)
 
@@ -1621,6 +2614,13 @@ class DeleteKycView(APIView):
         data = {'message': 'Objet KYC supprimé avec succès.'}
         return JsonResponse(data)
     
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+    
 ######################################## FootSoldiers CRUD ################################################
 # Lister tous les footsoldiers
 class ListeFootsoldiersView(APIView):
@@ -1628,9 +2628,36 @@ class ListeFootsoldiersView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
-        footsoldiers = Footsoldiers.objects.filter(user=request.user)
+        footsoldiers = Footsoldiers.objects.all()
         data = {'footsoldiers': list(footsoldiers.values())}
         return JsonResponse(data)
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+# footsoldiers for client
+class ClientFootsoldiersView(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    serializer_class = FootsoldiersSerializer
+
+    def get(self, request):
+        user = request.user
+        footsoldiers = Footsoldiers.objects.filter(footsoldiers_clients=user.the_client)
+        serializer = self.serializer_class(footsoldiers, many=True)
+        return Response(serializer.data)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
     
 # Ajouter un nouveau userclient
 class AjouterFootsoldiers(APIView):
@@ -1639,6 +2666,17 @@ class AjouterFootsoldiers(APIView):
 
     @csrf_exempt
     def post(self, request):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         footsoldiers_phonenumber = request.POST.get('footsoldiers_phonenumber')
         if not footsoldiers_phonenumber:
             return HttpResponse("Le champ footsoldiers_phonenumber est requis.", status=400)
@@ -1659,15 +2697,12 @@ class AjouterFootsoldiers(APIView):
         if not footsoldiers_country_id:
             return HttpResponse("Le champ footsoldiers_country_id est requis.", status=400)
 
-        user = request.user
-
         footsoldiers = Footsoldiers(
             footsoldiers_phonenumber=footsoldiers_phonenumber,
             footsoldiers_fullname=footsoldiers_fullname,
             footsoldiers_zone=footsoldiers_zone,
             footsoldiers_clients_id=footsoldiers_clients_id,
-            footsoldiers_country_id=footsoldiers_country_id,
-            user=user
+            footsoldiers_country_id=footsoldiers_country_id
         )
         footsoldiers.save()
 
@@ -1676,8 +2711,15 @@ class AjouterFootsoldiers(APIView):
 
     def get(self, request):
         return JsonResponse({'error': 'Méthode non autorisée'})
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
     
-# Mettre à jour un produit existant
+# Mettre à jour un footsoldiers existant
 class UpdateFootsoldiersView(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
     permission_classes = [IsAuthenticated]
@@ -1690,10 +2732,16 @@ class UpdateFootsoldiersView(APIView):
 
     def put(self, request, footsoldiers_id):
         user = request.user
-        
-        # Vérification que l'utilisateur connecté a bien le droit de modifier des footsoldiers
-        if not user.has_perm('votreapp.change_footsoldiers'):
-            return HttpResponse("Vous n'avez pas le droit de modifier des footsoldiers.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
 
         footsoldiers = self.get_object(footsoldiers_id)
         
@@ -1716,6 +2764,13 @@ class UpdateFootsoldiersView(APIView):
 
         data = {'message': 'Footsoldiers modifié avec succès'}
         return JsonResponse(data)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
     
 # Supprimer un produit existant
 class DeleteFootsoldiersView(APIView):
@@ -1724,191 +2779,218 @@ class DeleteFootsoldiersView(APIView):
 
     def delete(self, request, footsoldiers_id):
         user = request.user
-        
-        # Vérification que l'utilisateur connecté a bien le droit de supprimer des footsoldiers
-        if not user.has_perm('votreapp.delete_footsoldiers'):
-            return HttpResponse("Vous n'avez pas le droit de supprimer des footsoldiers.", status=403)
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
 
         footsoldiers = self.get_object(footsoldiers_id)
         footsoldiers.delete()
 
         data = {'message': 'Footsoldiers supprimé avec succès'}
         return JsonResponse(data)
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 ######################################## Clients CRUD #################################################
-@authentication_classes([ExpiringTokenAuthentication])
-@permission_classes([IsAuthenticated])
+# list des clients
 class ClientsList(generics.ListAPIView):
-    serializer_class = ClientsSerializer
-    def get_queryset(self):
-        user = self.request.user
-        return Clients.objects.filter(user=user)
-
-@authentication_classes([ExpiringTokenAuthentication])
-@permission_classes([IsAuthenticated])
-class CreateClient(generics.CreateAPIView):
-    serializer_class = ClientsSerializer
-
-    def perform_create(self, serializer):
-        user = self.request.user
-        serializer.save(user=user)
-
-@authentication_classes([ExpiringTokenAuthentication])
-@permission_classes([IsAuthenticated])
-class ClientsUpdate(generics.UpdateAPIView):
-    serializer_class = ClientsSerializer
-    def get_queryset(self):
-        user = self.request.user
-        return Clients.objects.filter(user=user)
-
-@authentication_classes([ExpiringTokenAuthentication])
-@permission_classes([IsAuthenticated])
-class ClientsDelete(generics.DestroyAPIView):
-    serializer_class = ClientsSerializer
-    def get_queryset(self):
-        user = self.request.user
-        return Clients.objects.filter(user=user)
-
-######################################## UserClient CRUD #################################################
-# Lister tous les userclient
-class UsersClientListView(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        user_id = request.user.id
-        userclients = UsersClient.objects.filter(user_id=user_id)
-        data = {'userclients': []}
-        for userclient in userclients:
-            data['userclients'].append({
-                'id_userclient': userclient.id_userclient,
-                'userclient_email': userclient.userclient_email,
-                'userclient_identifiant': userclient.userclient_identifiant,
-                'userclient_name': userclient.userclient_name,
-                'privilege_id': userclient.privilege_id,
-                'country_id': userclient.country_id,
-                'client_id': userclient.client_id,
-                'user_id': userclient.user_id,
-            })
-        return Response(data)
+    serializer_class = ClientsSerializer
+    def get_queryset(self):
+        return Clients.objects.all()
     
-# Afficher les détails d'un user client spécifique
-class DetailsUserClient(APIView):
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+# AJouter un client
+class CreateClient(generics.CreateAPIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @csrf_exempt
+    def post(self, request, format=None):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
+        country_id = request.data.get('country_id', None)
+        if not country_id:
+            return HttpResponse("Le champ country_id est requis.", status=400)
+        client_logo = request.data.get('client_logo', None)
+        if not client_logo:
+            return HttpResponse("Le champ client_logo est requis.", status=400)
+        client_industry = request.data.get('client_industry', None)
+        if not client_industry:
+            return HttpResponse("Le champ client_industry est requis.", status=400)
+
+        client_name = request.data.get('client_name', None)
+        if not client_name:
+            return HttpResponse("Le champ client_name est requis.", status=400)
+
+        client_status = request.data.get('client_status', None)
+        if not client_status:
+            return HttpResponse("Le champ client_status est requis.", status=400)
+
+        try:
+            country = Countries.objects.get(id_country=country_id)
+        except Countries.DoesNotExist:
+            data = {'message':'Le pays spécifié existe pas.'}
+            return HttpResponse(data)
+        
+        try:
+            industry = Industry.objects.get(id_industry=client_industry)
+        except Countries.DoesNotExist:
+            data = {'message':'Le pays spécifié existe pas.'}
+            return HttpResponse(data)
+
+        clients = Clients(country_id=country,
+                              client_industry=industry,
+                              client_logo=client_logo,
+                              client_name=client_name,
+                              client_status=client_status
+                              )
+        clients.save()
+
+        data = {'message': 'Client ajouté avec succès'}
+        return JsonResponse(data)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+# Afficher les détails d'un client
+class DetailsClient(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request, client_id, format=None):
         try:
-            userclient = UsersClient.objects.get(id_userclient=client_id)
-        except UsersClient.DoesNotExist:
-            return JsonResponse({'error': "L'utilisateur n'existe pas"}, status=404)
+            clients = Clients.objects.get(id_client=client_id)
+        except Clients.DoesNotExist:
+            data = {'message':"Le Client n'existe pas"}
+            return JsonResponse(data, status=404)
             
         data = {
-            'user_id': userclient.user_id,
-            'userclient_email': userclient.userclient_email,
-            'userclient_identifiant': userclient.userclient_identifiant,
-            'userclient_name': userclient.userclient_name,
-            'privilege_id': userclient.privilege_id,
-            'country_id': userclient.country_id,
-            'client_id': userclient.client_id,
+            'client_name': clients.client_name,
+            'client_status': clients.client_status,
+            'country_id': clients.country_id.id_country,
+            'client_logo': request.build_absolute_uri(clients.client_logo.url),
+            'client_industry': clients.client_industry.id_industry,
         }
 
-        return JsonResponse(data)
+        return Response(data)
     
-# Ajouter un nouveau userclient
-class AjouterUserClientView(APIView):
-    authentication_classes = [ExpiringTokenAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    @csrf_exempt
-    def post(self, request, *args, **kwargs):
-        userclient_email = request.POST.get('userclient_email', None)
-        if not userclient_email:
-            return HttpResponse("Le champ userclient_email est requis.", status=400)
-        userclient_identifiant = request.POST.get('userclient_identifiant', None)
-        if not userclient_identifiant:
-            return HttpResponse("Le champ userclient_identifiant est requis.", status=400)
-        userclient_name = request.POST.get('userclient_name', None)
-        if not userclient_name:
-            return HttpResponse("Le champ userclient_name est requis.", status=400)
-        privilege_id = request.POST.get('privilege_id', None)
-        if not privilege_id:
-            return HttpResponse("Le champ privilege_id est requis.", status=400)
-        country_id = request.POST.get('country_id', None)
-        if not country_id:
-            return HttpResponse("Le champ country_id est requis.", status=400)
-        client_id = request.POST.get('client_id', None)
-        if not client_id:
-            return HttpResponse("Le champ client_id est requis.", status=400)
-        profile_picture = request.FILES.get('profile_picture', None)
-
-        # récupération de l'utilisateur connecté
-        user = request.user
-
-        # vérification que l'utilisateur connecté a bien le droit d'ajouter des userclient
-        if not user.has_perm('votreapp.add_usersclient'):
-            return HttpResponse("Vous n'avez pas le droit d'ajouter des userclient.", status=403)
-
-        # création du nouvel utilisateur client
-        userclient = UsersClient(userclient_email=userclient_email, userclient_identifiant=userclient_identifiant,
-                          userclient_name=userclient_name,
-                          country_id=country_id, client_id=client_id, profile_picture=profile_picture, user=user)
-        userclient.save()
-
-        data = {'message': 'Utilisateur Client ajouté avec succès'}
-        return JsonResponse(data)
-
-    def get(self, request, *args, **kwargs):
-        return JsonResponse({'error': 'Méthode non autorisée'})
-
-# Mettre à jour un produit existant
-class UpdateUserClientView(APIView):
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+    
+# modifier un client
+class ClientsUpdate(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get_object(self, client_id):
         try:
-            return UsersClient.objects.get(id_userclient=client_id)
-        except UsersClient.DoesNotExist:
+            return Clients.objects.get(id_client=client_id)
+        except Clients.DoesNotExist:
             raise Http404
 
     def put(self, request, client_id):
-        userclient = self.get_object(client_id)
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
 
-        # vérification que l'utilisateur connecté a bien le droit de modifier des userclient
-        if not request.user.has_perm('votreapp.change_usersclient'):
-            return HttpResponse("Vous n'avez pas le droit de modifier des userclient.", status=403)
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
+        clients = self.get_object(client_id)
+        clients.client_name = request.data.get('client_name', clients.client_name)
+        clients.client_status = request.data.get('client_status', clients.client_status)
+        clients.client_logo = request.data.get('client_logo', clients.client_logo)
+        country_id = request.data.get('id_country')
+        if country_id:
+            country = Countries.objects.get(id_country=country_id)
+            clients.id_country = country
+        client_industry = request.data.get('id_industry')
+        if client_industry:
+            industry = Industry.objects.get(id_industry=client_industry)
+            clients.id_industry = industry
+        clients.save()
 
-        userclient.userclient_email = request.data.get('userclient_email', userclient.userclient_email)
-        userclient.userclient_identifiant = request.data.get('userclient_identifiant', userclient.userclient_identifiant)
-        userclient.userclient_name = request.data.get('userclient_name', userclient.userclient_name)
-        userclient.privilege_id = request.data.get('privilege_id', userclient.privilege_id)
-        userclient.country_id = request.data.get('country_id', userclient.country_id)
-        userclient.client_id = request.data.get('client_id', userclient.client_id)
-        userclient.save()
-
-        data = {'message': 'Utilisateur Client modifié avec succès'}
+        data = {'message': 'Client modifié avec succès'}
         return JsonResponse(data)
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
-# Supprimer un usercleint existant
-class SupprimerUserClientView(APIView):
+# supprimer un client
+class ClientsDelete(generics.DestroyAPIView):
     authentication_classes = [ExpiringTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
-    def delete(self, request, userclient_id):
-        try:
-            userclient = UsersClient.objects.get(pk=userclient_id)
-        except UsersClient.DoesNotExist:
-            return JsonResponse({'error': "L'utilisateur n'existe pas"}, status=404)
+    serializer_class = ClientsSerializer
 
-        # Vérification que l'utilisateur connecté a bien le droit de supprimer l'utilisateur client
-        if not request.user.has_perm('votreapp.delete_usersclient'):
-            return HttpResponse("Vous n'avez pas le droit de supprimer cet utilisateur client.", status=403)
+    def delete(self, request, id_client):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
 
-        userclient.delete()
-
-        return JsonResponse({'message': 'L\'utilisateur client a été supprimé avec succès.'})
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
+        client = self.get_object(id_client)
+        client.delete()
     
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
 ######################################## Product CRUD ###################################################
 # Lister tous les produits
 class ProduitListView(APIView):
@@ -1916,9 +2998,37 @@ class ProduitListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        produits = Produit.objects.filter(user=request.user)
+        produits = Produit.objects.all()
         data = {'produits': list(produits.values())}
         return Response(data)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+    
+# liste des produits par client
+class ProductListByClientView(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    serializer_class = ProduitSerializer
+
+    def get(self, request):
+        user = request.user
+        produits = Produit.objects.filter(client_id=user.the_client.id_client)
+        serialized_produits = self.serializer_class(produits, many=True)
+        return Response(serialized_produits.data)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+    
 
 # Afficher les détails d'un produit spécifique
 class DetailsProduit(APIView):
@@ -1926,17 +3036,6 @@ class DetailsProduit(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, produit_id, format=None):
-
-        user = request.user
-        
-        if not user.is_superuser:
-            try:
-                privilege_admin = Privilege.objects.get(id=5)
-            except Privilege.DoesNotExist:
-                return HttpResponse("Le privilège 'admin' n'existe pas.")
-            
-            if not user.privilege == privilege_admin:
-                return HttpResponse("Vous n'avez pas le droit de supprimer un utilisateur.")
 
         try:
             produit = Produit.objects.get(id_product=produit_id)
@@ -1955,6 +3054,13 @@ class DetailsProduit(APIView):
 
         return JsonResponse(data)
     
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+    
 # Ajouter un nouveau produit
 class ProduitCreateView(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
@@ -1962,6 +3068,17 @@ class ProduitCreateView(APIView):
 
     @csrf_exempt
     def post(self, request, *args, **kwargs):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         product_picture = request.FILES.get('product_picture', None)
         if not product_picture:
             return HttpResponse("Le champ product_picture est requis.", status=400)
@@ -1981,21 +3098,21 @@ class ProduitCreateView(APIView):
         if not client_id:
             return HttpResponse("Le champ client_id est requis.", status=400)
 
-        user = request.user
+        # user = request.user
 
-        if not user.is_superuser:
-            try:
-                privilege_admin = Privilege.objects.get(id=5)
-            except Privilege.DoesNotExist:
-                return HttpResponse("Le privilège 'admin' n'existe pas.")
+        # if not user.is_superuser:
+        #     try:
+        #         privilege_admin = Privilege.objects.get(id=5)
+        #     except Privilege.DoesNotExist:
+        #         return HttpResponse("Le privilège 'admin' n'existe pas.")
 
-            if not user.privilege == privilege_admin:
-                return HttpResponse("Vous n'avez pas le droit de créer un utilisateur.")
+        #     if not user.privilege == privilege_admin:
+        #         return HttpResponse("Vous n'avez pas le droit de créer un utilisateur.")
             
         # création du nouveau produit
         produit = Produit(product_picture=product_picture, product_name=product_name,
                           product_price=product_price, product_commission=product_commission,
-                          country_id=country_id, client_id=client_id, user=user)
+                          country_id=country_id, client_id=client_id)
         produit.save()
 
         data = {'message': 'Produit ajouté avec succès'}
@@ -2003,65 +3120,61 @@ class ProduitCreateView(APIView):
 
     def get(self, request, *args, **kwargs):
         return JsonResponse({'error': 'Méthode non autorisée'})
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # Mettre à jour un produit existant
 class ModifierProduit(APIView):
     authentication_classes = [ExpiringTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
-    @csrf_exempt
-    def post(self, request, produit_id, *args, **kwargs):
+    def get_object(self, produit_id):
+        try:
+            return Produit.objects.get(id_product=produit_id)
+        except Produit.DoesNotExist:
+            raise Http404
 
+    def put(self, request, produit_id):
         user = request.user
         if not user.is_superuser:
             try:
-                privilege_admin = Privilege.objects.get(id=5)
+                privilege_admin = Privilege.objects.get(id=1)
             except Privilege.DoesNotExist:
-                return HttpResponse("Le privilège 'admin' n'existe pas.")
-            
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
             if not user.privilege == privilege_admin:
-                return HttpResponse("Vous n'avez pas le droit de créer un utilisateur.")
-
-        try:
-            produit = Produit.objects.get(id_product=produit_id)
-        except Produit.DoesNotExist:
-            return JsonResponse({'error': "Le produit n'existe pas"}, status=404)
-
-        product_picture = request.FILES.get('product_picture', produit.product_picture)
-        product_name = request.POST.get('product_name', produit.product_name)
-        product_price = request.POST.get('product_price', produit.product_price)
-        product_commission = request.POST.get('product_commission', produit.product_commission)
-        country_id = request.POST.get('country_id', produit.country_id)
-        client_id = request.POST.get('client_id', produit.client_id)
-
-        produit.product_picture = product_picture
-        produit.product_name = product_name
-        produit.product_price = product_price
-        produit.product_commission = product_commission
-        produit.country_id = country_id
-        produit.client_id = client_id
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
+        produit = self.get_object(produit_id)
+        produit.product_name = request.data.get('product_name', produit.product_name)
+        produit.product_price = request.data.get('product_price', produit.product_price)
+        produit.product_commission = request.data.get('product_commission', produit.product_commission)
+        country_id = request.data.get('country')
+        if country_id:
+            countries = Countries.objects.get(id_country=country_id)
+            produit.country = countries
+        client_id = request.data.get('client')
+        if client_id:
+            clients = Clients.objects.get(id_client=client_id)
+            produit.client = clients
+        produit.product_picture = request.data.get('product_picture', produit.product_picture)
         produit.save()
 
         data = {'message': 'Produit modifié avec succès'}
         return JsonResponse(data)
 
-    def get(self, request, produit_id, format=None):
-        try:
-            produit = Produit.objects.get(id=produit_id)
-        except Produit.DoesNotExist:
-            return JsonResponse({'error': "Le produit n'existe pas"}, status=404)
-
-        data = {
-            'product_picture': produit.product_picture.url,
-            'product_name': produit.product_name,
-            'product_price': produit.product_price,
-            'product_commission': produit.product_commission,
-            'country_id': produit.country_id,
-            'client_id': produit.client_id,
-            'user_id': produit.user_id,
-        }
-
-        return JsonResponse(data)
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 # Supprimer un produit existant
 class SupprimerProduit(APIView):
@@ -2071,29 +3184,45 @@ class SupprimerProduit(APIView):
     def delete(self, request, produit_id, format=None):
 
         user = request.user
-        
         if not user.is_superuser:
             try:
-                privilege_admin = Privilege.objects.get(id=5)
+                privilege_admin = Privilege.objects.get(id=1)
             except Privilege.DoesNotExist:
-                return HttpResponse("Le privilège 'admin' n'existe pas.")
-            
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
             if not user.privilege == privilege_admin:
-                return HttpResponse("Vous n'avez pas le droit de supprimer un utilisateur.")
-        
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         produit = get_object_or_404(Produit, id_product=produit_id)
         produit.delete()
         return Response({'message': 'Produit supprimé avec succès'}, status=status.HTTP_204_NO_CONTENT)
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
 
 ######################################## dashboard CRUD ###################################################
-# dashboard for user part
 class DashboardView(generics.RetrieveUpdateAPIView):
     queryset = Dashboards.objects.all()
     serializer_class = DashboardsSerializer
     permission_classes = (IsAuthenticated,)
 
     def get_object(self):
-        user = self.request.user
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
         # Récupérer le tableau de bord correspondant à l'utilisateur actuel
         dashboard, created = Dashboards.objects.get_or_create(user=user)
         return dashboard
@@ -2103,6 +3232,377 @@ class CreateDashboardView(generics.CreateAPIView):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+######################################## Domaine CRUD ###################################################
+class AjouterDomaine(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @csrf_exempt
+    def post(self, request, format=None):
+        domaine_name = request.POST.get('domaine_name', None)
+        if not domaine_name:
+            return HttpResponse("Le champ domaine_name est requis.")
+        
+        domaine = Domaine(
+            domaine_name=domaine_name,
+        )
+        domaine.save()
+
+        data = {'message': 'Domaine ajouté avec succès'}
+        return JsonResponse(data)
+
+    def get(self, request, format=None):
+        return JsonResponse({'error': 'Méthode non autorisée'})
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+# list des domaines
+class ListeDomaine(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        domaine = Domaine.objects.all()
+        data = {
+            'Domaines': list(domaine.values()),
+        }
+        return Response(data)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+      
+######################################## Locality CRUD ###################################################
+# ajouter une localité
+class AjouterLocality(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @csrf_exempt
+    def post(self, request, format=None):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
+        locality_name = request.POST.get('locality_name', None)
+        if not locality_name:
+            return HttpResponse("Le champ locality_name est requis.")
+        id_country = request.POST.get('id_country', None)
+        if not id_country:
+            return HttpResponse("Le champ id_country est requis.")
+
+        try:
+            country = Countries.objects.get(id_country=id_country)
+        except Countries.DoesNotExist:
+            return HttpResponse("Le Pays spécifié n'existe pas.")
+
+
+        lacality = Locality(
+            locality_name=locality_name, 
+            country=country,
+        )
+        lacality.save()
+
+        data = {'message': 'Localité ajouté avec succès'}
+        return JsonResponse(data)
+
+    def get(self, request, format=None):
+        return JsonResponse({'error': 'Méthode non autorisée'})
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+# list des localités
+class ListeLocality(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        locality = Locality.objects.all()
+        data = {
+            'Localités': list(locality.values()),
+        }
+        return Response(data)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+      
+######################################## Industry CRUD ###################################################
+# ajouter une localité
+class AjouterIndustrie(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @csrf_exempt
+    def post(self, request, format=None):
+        user = request.user
+        if not user.is_superuser:
+            try:
+                privilege_admin = Privilege.objects.get(id=1)
+            except Privilege.DoesNotExist:
+                data = {'message':"Le privilège 'admin' n'existe pas."}
+                return HttpResponse(data)
+
+            if not user.privilege == privilege_admin:
+                data = {'message':"Vous n'avez pas le droit de créer un utilisateur."}
+                return HttpResponse(data)
+        industry_name = request.POST.get('industry_name', None)
+        if not industry_name:
+            return HttpResponse("Le champ industry_name est requis.")
+        industry_status = request.POST.get('industry_status', None)
+        if not industry_status:
+            return HttpResponse("Le champ industry_status est requis.")
+
+        industry = Industry(
+            industry_name=industry_name, 
+            industry_status=industry_status,
+        )
+        industry.save()
+
+        data = {'message': 'Industrie ajouté avec succès'}
+        return JsonResponse(data)
+
+    def get(self, request, format=None):
+        return JsonResponse({'error': 'Méthode non autorisée'})
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+# list des localités
+class ListeIndustry(APIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        industry = Industry.objects.all()
+        data = {
+            'Industries': list(industry.values()),
+        }
+        return Response(data)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+
+
+
+class TypeIDViewSet(viewsets.ModelViewSet):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    queryset = TypeID.objects.all()
+    serializer_class = TypeIDSerializer
+    filter_backends = (filters.DjangoFilterBackend,)
+    filterset_fields = ('id_country',)
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+class TypeIDList(generics.ListAPIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    queryset = TypeID.objects.all()
+    serializer_class = TypeIDSerializer
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+class TypeIDDetail(generics.RetrieveAPIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    queryset = TypeID.objects.all()
+    serializer_class = TypeIDSerializer
+
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+class TypeIDViewSets(viewsets.ViewSet):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request, id_country_id=None):
+        queryset = TypeID.objects.filter(id_country=id_country_id)
+        serializer = TypeIDSerializer(queryset, many=True)
+        return Response(serializer.data)
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+class TypeIDDetail(generics.RetrieveAPIView):
+    authentication_classes = [ExpiringTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    queryset = TypeID.objects.all()
+    serializer_class = TypeIDSerializer
+    def get_queryset(self):
+        id_country = self.kwargs.get('id_country')
+        if id_country:
+            queryset = TypeID.objects.filter(id_country=id_country)
+        else:
+            queryset = TypeID.objects.all()
+        return queryset
+    
+    def handle_exception(self, exc):
+        data = {}
+        if isinstance(exc, AuthenticationFailed):
+            data['token_status'] = 'Token Invalide'
+            return Response(data, status=status.HTTP_401_UNAUTHORIZED)
+        return super().handle_exception(exc)
+
+class CountryViewSet(APIView):
+    def get(self, request):
+        countries = Countries.objects.all()
+        serializer = CountrySerializer(countries, many=True)
+        return Response(serializer.data)
+        
+    def post(self, request):
+        serializer = CountrySerializer(data=request.data)
+
+        if serializer.is_valid(raise_exception=False):
+                    country = serializer.save()
+                    return Response({"status": "ok", "message": f"Country {country.country_name} created"})
+        else:
+            errors = serializer.errors
+            print(errors)
+            data=json.dumps(errors)
+            print(data)
+            tab=[]
+            default_errors = serializer.errors
+            new_error = {}
+            for field_name, field_errors in default_errors.items():
+                new_error[field_name] = field_errors[0]
+
+            return Response({"status": "nok", "message": new_error}, status=status.HTTP_400_BAD_REQUEST)
+    
+class clientsViewSet(viewsets.ModelViewSet):
+    queryset = Clients.objects.all()
+    serializer_class = ClientsSerializer
+    filter_backends = (filters.DjangoFilterBackend,)
+
+class EducationViewSet(viewsets.ModelViewSet):
+    queryset = EducationLevel.objects.all()
+    serializer_class = EducationSerializer
+    filter_backends = (filters.DjangoFilterBackend,)
+    filterset_fields = ('id_country',)
+
+class CreateUserView(APIView):
+    def post(self, request, *args, **kwargs):
+        serializer = UserSerializer(data=request.data)
+        
+        print("test")
+        if serializer.is_valid(raise_exception=False):
+                    user = serializer.save()
+
+                    # create a new Kyc object
+                    kyc = Kyc.objects.create(
+                        userId=user,
+                        createdAt=timezone.now(),
+                        email=user.email,
+                        nom=user.nom,
+                        prenoms=user.prenoms,
+                        niveau_education=user.niveau_education,
+                        localite=user.localite,
+                        pays=user.pays,
+                        username=user.username,
+                        date_naissance=user.date_naissance,
+                        lieu_naissance=user.lieu_naissance,
+                        type_piece=user.type_piece,
+                        numero_piece=user.numero_piece,
+                        date_expiration=user.date_expiration,
+                        photo_selfie=user.photo_selfie,
+                        piece_recto=user.piece_recto,
+                        piece_verso=user.piece_verso,
+                        isNomOk=False,
+                        isPrenomOk=False,
+                        isTypepPieceOk=False,
+                        isDateNaissanceOk=False,
+                        isLieuNaissanceOk=False,
+                        isTypePieceOk=False,
+                        isNumeroPieceOk=False,
+                        isDateExpirationOk=False,
+                        isPhotoSelfieOk=False,
+                        isPieceRectoOk=False,
+                        isPieceVersoOk=False,
+                        isAllok=False,
+                    )
+
+                    user.save()
+                    kyc.save()
+
+                    return Response({"status": "ok", "message": f"User {user.numero} created"})
+        else:
+            errors = serializer.errors
+            print(errors)
+            data=json.dumps(errors)
+            print(data)
+            tab=[]
+            default_errors = serializer.errors
+            new_error = {}
+            for field_name, field_errors in default_errors.items():
+                new_error[field_name] = field_errors[0]
+
+            return Response(new_error, status=status.HTTP_400_BAD_REQUEST)
+
+#curl -X POST http://localhost:8000/api/uploadImages/ -H "Content-Type: multipart/form-data" -b "cookie1=value1;cookie2=value2" -H "X-CSRFToken: GLafZcpiUT2sfwZwujowMWp0OtupUEcEZGNFgo7DtsLzgApRblL9pght8V6WlEYF" -F "file=@/Users/gillesgnanagbe/Desktop/Screenshot 2023-01-25 at 18.22.22.png“ 
+
+def check_otp(request, token, otp):
+    try:
+        tp = TokenPin.objects.get(token=token)
+    except TokenPin.DoesNotExist:
+        return JsonResponse({'status':'404','error': 'Invalid token'}, status=404)
+    if tp.pin != otp:
+        return JsonResponse({'status':'401','error': 'Invalid OTP'}, status=401)
+    return JsonResponse({'status':'200','message': 'OTP is valid'})
 
 @api_view(['GET'])
 def search_token_pin(request, token, pin,phone):
@@ -2183,157 +3683,3 @@ def generate_token_pin(request, phone_number):
     token_pin = TokenPin.objects.create(phone_number=phone_number, token=token, pin=pin)
     return JsonResponse({"token": token, "pin": pin})
 
-#curl -X POST http://localhost:8000/api/uploadImages/ -H "Content-Type: multipart/form-data" -b "cookie1=value1;cookie2=value2" -H "X-CSRFToken: GLafZcpiUT2sfwZwujowMWp0OtupUEcEZGNFgo7DtsLzgApRblL9pght8V6WlEYF" -F "file=@/Users/gillesgnanagbe/Desktop/Screenshot 2023-01-25 at 18.22.22.png“ 
-
-def check_otp(request, token, otp):
-    try:
-        tp = TokenPin.objects.get(token=token)
-    except TokenPin.DoesNotExist:
-        return JsonResponse({'status':'404','error': 'Invalid token'}, status=404)
-    if tp.pin != otp:
-        return JsonResponse({'status':'401','error': 'Invalid OTP'}, status=401)
-    return JsonResponse({'status':'200','message': 'OTP is valid'})
-
-class CreateUserView(APIView):
-    def post(self, request, *args, **kwargs):
-        serializer = UserSerializer(data=request.data)
-        
-        print("test")
-        if serializer.is_valid(raise_exception=False):
-                    user = serializer.save()
-
-                    # create a new Kyc object
-                    kyc = Kyc.objects.create(
-                        userId=user,
-                        createdAt=timezone.now(),
-                        email=user.email,
-                        nom=user.nom,
-                        prenoms=user.prenoms,
-                        niveau_education=user.niveau_education,
-                        localite=user.localite,
-                        pays=user.pays,
-                        username=user.username,
-                        date_naissance=user.date_naissance,
-                        lieu_naissance=user.lieu_naissance,
-                        type_piece=user.type_piece,
-                        numero_piece=user.numero_piece,
-                        date_expiration=user.date_expiration,
-                        photo_selfie=user.photo_selfie,
-                        piece_recto=user.piece_recto,
-                        piece_verso=user.piece_verso,
-                        isNomOk=False,
-                        isPrenomOk=False,
-                        isTypepPieceOk=False,
-                        isDateNaissanceOk=False,
-                        isLieuNaissanceOk=False,
-                        isTypePieceOk=False,
-                        isNumeroPieceOk=False,
-                        isDateExpirationOk=False,
-                        isPhotoSelfieOk=False,
-                        isPieceRectoOk=False,
-                        isPieceVersoOk=False,
-                        isAllok=False,
-                    )
-
-                    user.save()
-                    kyc.save()
-
-                    return Response({"status": "ok", "message": f"User {user.numero} created"})
-        else:
-            errors = serializer.errors
-            print(errors)
-            data=json.dumps(errors)
-            print(data)
-            tab=[]
-            default_errors = serializer.errors
-            new_error = {}
-            for field_name, field_errors in default_errors.items():
-                new_error[field_name] = field_errors[0]
-
-            return Response(new_error, status=status.HTTP_400_BAD_REQUEST)
-
-class EducationViewSet(viewsets.ModelViewSet):
-    queryset = EducationLevel.objects.all()
-    serializer_class = EducationSerializer
-    filter_backends = (filters.DjangoFilterBackend,)
-    filterset_fields = ('id_country',)
-
-class DomaineViewSet(viewsets.ModelViewSet):
-    queryset = Domaine.objects.all()
-    serializer_class = EducationSerializer
-    filter_backends = (filters.DjangoFilterBackend,)
-
-class LocalityViewSet(viewsets.ModelViewSet):
-    queryset = Locality.objects.all()
-    serializer_class = LocalitySerializer
-    filter_backends = (filters.DjangoFilterBackend,)
-    filterset_fields = ('id_country',)
-
-@authentication_classes([ExpiringTokenAuthentication])
-@permission_classes([IsAuthenticated])
-class clientsViewSet(viewsets.ModelViewSet):
-    queryset = Clients.objects.all()
-    serializer_class = ClientsSerializer
-    filter_backends = (filters.DjangoFilterBackend,)
-
-class IndustryViewSet(viewsets.ModelViewSet):
-    queryset = Industry.objects.all()
-    serializer_class = IndustrySerializer
-    filter_backends = (filters.DjangoFilterBackend,)
-
-class TypeIDViewSet(viewsets.ModelViewSet):
-    queryset = TypeID.objects.all()
-    serializer_class = TypeIDSerializer
-    filter_backends = (filters.DjangoFilterBackend,)
-    filterset_fields = ('id_country',)
-
-class TypeIDList(generics.ListAPIView):
-    queryset = TypeID.objects.all()
-    serializer_class = TypeIDSerializer
-
-class TypeIDDetail(generics.RetrieveAPIView):
-    queryset = TypeID.objects.all()
-    serializer_class = TypeIDSerializer
-
-class TypeIDViewSets(viewsets.ViewSet):
-    def list(self, request, id_country_id=None):
-        queryset = TypeID.objects.filter(id_country=id_country_id)
-        serializer = TypeIDSerializer(queryset, many=True)
-        return Response(serializer.data)
-
-class TypeIDDetail(generics.RetrieveAPIView):
-    queryset = TypeID.objects.all()
-    serializer_class = TypeIDSerializer
-    def get_queryset(self):
-        id_country = self.kwargs.get('id_country')
-        if id_country:
-            queryset = TypeID.objects.filter(id_country=id_country)
-        else:
-            queryset = TypeID.objects.all()
-        return queryset
-    
-class CountryViewSet(APIView):
-    def get(self, request):
-        countries = Countries.objects.all()
-        serializer = CountrySerializer(countries, many=True)
-        return Response(serializer.data)
-        
-    def post(self, request):
-        serializer = CountrySerializer(data=request.data)
-
-        if serializer.is_valid(raise_exception=False):
-                    country = serializer.save()
-                    return Response({"status": "ok", "message": f"Country {country.country_name} created"})
-        else:
-            errors = serializer.errors
-            print(errors)
-            data=json.dumps(errors)
-            print(data)
-            tab=[]
-            default_errors = serializer.errors
-            new_error = {}
-            for field_name, field_errors in default_errors.items():
-                new_error[field_name] = field_errors[0]
-
-            return Response({"status": "nok", "message": new_error}, status=status.HTTP_400_BAD_REQUEST)
-    

@@ -1,15 +1,13 @@
 from rest_framework import serializers
-from .models import User, Countries,EducationLevel,Locality,TypeID,Media,QuizExamen,AnswersExamen,QuizSection ,AnswersSection,Dashboards,Footsoldiers,Produit,Target,UserExam,UserScoreExam
-from .models import User,Media,Countries,TypeID,Clients,Chapters, EducationLevel, Locality,TokenPin,Kyc, Industry,Produit,Pos,Training,Chapters,Sections,Exam,Domaine,UsersClient
-from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.serializers import Serializer, FileField
-from rest_framework.parsers import MultiPartParser, FormParser
+from .models import User, Countries,EducationLevel,Locality,TypeID,Media,QuizExamen,AnswersExamen,QuizSection ,AnswersSection,Dashboards,Footsoldiers,Produit,Target,UserExam,UserScoreExam
+from .models import User,Media,Countries,TypeID,Clients,Chapters, EducationLevel, Locality,TokenPin,Kyc, Industry,Produit,Pos,Training,Chapters,Sections,Exam,Domaine,UsersClient,Privilege
 
-
-# class TaskSerializer(serializers.ModelSerializer):
-#     class Meta:
-#         model = Task
-#         fields = '__all__ '
+# privilege serializer
+class PrivilegeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Privilege
+        fields = '__all__ '
 
 class MediaSerializer(serializers.ModelSerializer):
       class Meta():
@@ -21,12 +19,6 @@ class UploadSerializer(Serializer):
     file_uploaded = FileField()
     class Meta:
         fields = ['file_uploaded']
-
-# user dashboard serializer
-# class UserDashboardSerializer(serializers.ModelSerializer):
-#     class Meta:
-#         model = UserDashboard
-#         fields = '__all__'
 
 # user serializer 
 class UserSerializer(serializers.ModelSerializer):

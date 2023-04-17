@@ -1,27 +1,21 @@
-from django.urls import path, re_path, include
-from .views import CustomAuthToken,DomaineViewSet
-from .views import UserView, IndustryViewSet, CountryViewSet,EducationViewSet,LocalityViewSet,TypeIDViewSet
-from api.views import generate_token_pin,check_otp,upload_image,getToken,FileViewSet,AjouterFootsoldiers,AjouterTargetView,TargetListView,ModifierTarget
-from rest_framework.routers import DefaultRouter
-from django.conf.urls.static import static
-from django.conf import settings
-from .views import TypeIDList, TypeIDDetail, LogoutView,UsersClientListView,AjouterKYCView,ListeKYC,UpdateKYCView,DeleteKycView,CreatePosView,ListPosView
+
 from rest_framework.schemas import get_schema_view
-from rest_framework.authtoken.views import ObtainAuthToken
-from django.conf import settings
-from django.conf.urls.static import static
-from django.urls import path, include
 from rest_framework import routers
-from .views import UploadViewSet,ClientsList,CreateClient,ClientsUpdate,ClientsDelete,AjouterUserClientView,SupprimerProduit,ListeFootsoldiersView,SupprimerTarget,DeleteTraining
-from .views import search_token_pin,UpdateUserView,TrainingCreate,DetailsUserClient,SupprimerUserClientView,ModifierProduit,UpdateFootsoldiersView,AjouterTypeId,ListeTypeId,ModifierTraining
-from .views import PosExcelUploadViewSet,CreateUsersView,TrainingList,UpdateUserClientView,ProduitListView,ProduitCreateView,DeleteFootsoldiersView,ModifierTypeId,DeleteTypeId,ModifierQuiz
-from .views import AjouterCountries,ModifierCountries,DeleteCountriesView,ListeCountries,AjouterEducationLevel,ListeEducationLevel,ModifierEducationLevel,DeleteEducationLevel,QuizList
-from .views import SectionCreate,SectionList,ModifierSection,DeleteSection,ChapterCreate,ChapterList,ModifierChapter,DeleteChapter,QuizSectionCreate,AnswerSectionCreate,ExamCreate,QuizExamCreate
-from .views import QuizExamList,ExamList,AnswerSectionList,UserExamCreate,UserExamList,AnswerExamList,AnswerExamCreate,UserScoreList,UserScoreCreate,DeleteUserView
-from django.urls import path
 from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
+from django.urls import path, include
+from django.conf.urls.static import static
+from django.conf import settings
+from .views import UserView, AjouterIndustrie, CountryViewSet,EducationViewSet,TypeIDViewSet,FileViewSet,AjouterFootsoldiers,AjouterTargetView,TargetListView,AjouterLocality,DetailsCountries
+from .views import TypeIDDetail, LogoutView,AjouterKYCView,ListeKYC,UpdateKYCView,DeleteKycView,CreatePosView,ListPosView,CustomAuthToken,AjouterDomaine,ListePrivilege,ClientFootsoldiersView
+from .views import UploadViewSet,ClientsList,CreateClient,ClientsUpdate,ClientsDelete,SupprimerProduit,ListeFootsoldiersView,SupprimerTarget,DeleteTraining,ListeIndustry,ClientTargetsView
+from .views import UpdateUserView,TrainingCreate,ModifierProduit,UpdateFootsoldiersView,AjouterTypeId,ListeTypeId,ModifierTraining,ModifierTarget,ClientUsersView,ProductListByClientView
+from .views import PosExcelUploadViewSet,CreateUsersView,TrainingList,ProduitListView,ProduitCreateView,DeleteFootsoldiersView,ModifierTypeId,DeleteTypeId,ModifierSectionQuiz,DetailsClient
+from .views import AjouterCountries,ModifierCountries,DeleteCountriesView,ListeCountries,AjouterEducationLevel,ListeEducationLevel,ModifierEducationLevel,DeleteEducationLevel,QuizSectionList,ListeLocality
+from .views import SectionCreate,SectionList,ModifierSection,DeleteSection,ChapterCreate,ChapterList,ModifierChapter,DeleteChapter,QuizSectionCreate,AnswerSectionCreate,ExamCreate,ListeDomaine,ClientPosView
+from .views import QuizExamList,ExamList,AnswerSectionList,UserExamCreate,UserExamList,AnswerExamList,AnswerExamCreate,UserScoreList,UserScoreCreate,DeleteUserView,QuizExamCreate,AjouterPrivilege
+from api.views import generate_token_pin,check_otp,upload_image,search_token_pin
 
 schema_view = get_schema_view(
     openapi.Info(
@@ -44,37 +38,67 @@ router1 = routers.DefaultRouter()
 router1.register(r'typeids', TypeIDViewSet, basename='typeids')
 
 urlpatterns = [
-    
-    #########################################################  SUPER ADMIN API PART  ##########################################################
-    
+
+    # api list by swagger
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('', include(router1.urls)),
 
-    # se déconnecté API
+    # logout API
     path('logout/', LogoutView.as_view(), name='logout'),
 
-    # se logger et générer le token API
+    # login API
     path('user-connection/', CustomAuthToken.as_view()),
-    # se logger et générer le token pour un user admin ou client
 
-    # super_users users_admin & users_reader CRUD API
-    path('users-list/', UserView.as_view(), name='user-list'),
-    path('create-users/', CreateUsersView.as_view(), name='create-user'),
-    path('update-users/<int:id>/', UpdateUserView.as_view()),
-    path('delete-users/<int:id>/', DeleteUserView.as_view()),
+    # super_users users_admin & users_reader CRUD API for Admin
+    path('list-user/', UserView.as_view(), name='list_user'),
+    path('ajouter-user/', CreateUsersView.as_view(), name='ajouter_user'),
+    path('modifier-user/<int:user_id>/', UpdateUserView.as_view(), name='modifier_user'),
+    path('supprimer-user/<int:user_id>/', DeleteUserView.as_view(), name='supprimer_user'),
+
+    # super_users users_admin & users_reader CRUD API for Client
+    path('list-userclient/', ClientUsersView.as_view(), name='list_user'),
+    
+    # settings setting_countries CRUD API
+    path('ajouter-countries/', AjouterCountries.as_view(), name='ajouter_countries'),
+    path('list-countries/', ListeCountries.as_view(), name='list_countries'),
+    path('modifier-countries/<int:country_id>/', ModifierCountries.as_view(), name='modifier_countries'),
+    path('detail-countries/<int:country_id>/', DetailsCountries.as_view(), name='detail_countries'),
+    path('supprimer-countries/<int:country_id>/', DeleteCountriesView.as_view(), name='supprimer_countries'),
 
     # clients CRUD API
-    path('list-clients/', ClientsList.as_view(), name='clients_list'),
-    path('create-clients/', CreateClient.as_view(), name='clients_create'),
-    path('update-clients/<int:pk>/', ClientsUpdate.as_view(), name='clients_update'),
-    path('delete-clients/<int:pk>/', ClientsDelete.as_view(), name='clients_delete'),
-   
-   # userclient management CRUD API
-    path('list-userclient/', UsersClientListView.as_view(), name='liste_userclient'),
-    path('ajouter-userclient/', AjouterUserClientView.as_view(), name='ajouter_userclient'),
-    path('modifier-userclient/<int:client_id>/', UpdateUserClientView.as_view(), name='modifier_userclient'),
-    path('detail-userclient/<int:client_id>/', DetailsUserClient.as_view(), name='detail_userclient'),
-    path('supprimer-userclient/<int:client_id>/', SupprimerUserClientView.as_view(), name='supprimer_userclient'),
+    path('list-clients/', ClientsList.as_view(), name='list_clients'),
+    path('ajouter-clients/', CreateClient.as_view(), name='ajouter_clients'),
+    path('detail-clients/<int:client_id>/', DetailsClient.as_view(), name='detail_clients'),
+    path('modifier-clients/<int:client_id>/', ClientsUpdate.as_view(), name='modifier_clients'),
+    path('supprimer-clients/<int:client_id>/', ClientsDelete.as_view(), name='modifier_clients'),
+
+    # settings setting_typeID CRUD API
+    path('ajouter-typeid/', AjouterTypeId.as_view(), name='ajouter_typeid'),
+    path('modifier-typeid/<int:type_id>/', ModifierTypeId.as_view(), name='modifier_typeid'),
+    path('list-typeid/', ListeTypeId.as_view(), name='list_setting_typeid'),
+    path('supprimer-typeid/<int:type_id>/', DeleteTypeId.as_view(), name='supprimer_typeid'),
+
+    # settings setting_privilege CRUD API
+    path('ajouter-privilege/', AjouterPrivilege.as_view(), name='ajouter_privilege'),
+    path('list-privilege/', ListePrivilege.as_view(), name='list_privilege'),
+
+    # domaine CRUD API
+    path('ajouter-domaine/', AjouterDomaine.as_view(), name='ajouter_domaine'),
+    path('list-domaine/', ListeDomaine.as_view(), name='list_domaine'),
+
+    # locality CRUD API
+    path('ajouter-localite/', AjouterLocality.as_view(), name='ajouter_localite'),
+    path('list-localite/', ListeLocality.as_view(), name='list_localite'),
+
+    # industry CRUD API
+    path('ajouter-industry/', AjouterIndustrie.as_view(), name='ajouter_industry'),
+    path('list-industry/', ListeIndustry.as_view(), name='list_industry'),
+
+    # settings setting_level CRUD API
+    path('ajouter-level/', AjouterEducationLevel.as_view(), name='ajouter_level'),
+    path('modifier-level/<int:education_id>/', ModifierEducationLevel.as_view(), name='modifier_level'),
+    path('list-level/', ListeEducationLevel.as_view(), name='list_level'),
+    path('supprimer-level/<int:education_id>/', DeleteEducationLevel.as_view(), name='supprimer_level'),
 
     # produit CRUD API
     path('list-produits/', ProduitListView.as_view(), name='liste_produits'),
@@ -82,11 +106,17 @@ urlpatterns = [
     path('modifier-produits/<int:produit_id>/', ModifierProduit.as_view(), name='modifier_produit'),
     path('supprimer-produits/<int:produit_id>/', SupprimerProduit.as_view(), name='supprimer_produit'),
 
+    # list des produits par client
+    path('list-produitbyclient/', ProductListByClientView.as_view(), name='liste_produitbyclient'),
+
     # FootSoldiers CRUD API
     path('list-footsoldiers/', ListeFootsoldiersView.as_view(), name='liste_footsoldiers'),
     path('ajouter-footsoldiers/', AjouterFootsoldiers.as_view(), name='ajouter_footsoldiers'),
     path('modifier-footsoldiers/<int:footsoldiers_id>/', UpdateFootsoldiersView.as_view(), name='modifier_footsoldiers'),
     path('supprimer-footsoldiers/<int:footsoldiers_id>/', DeleteFootsoldiersView.as_view(), name='supprimer_footsoldiers'),
+
+    # list des footsoldiers par client
+    path('list-footsoldierbyclient/', ClientFootsoldiersView.as_view(), name='liste_footsoldierbyclient'),
 
     #  KYC CRUD API
     path('ajouter-kyc/', AjouterKYCView.as_view(), name='ajouter_kyc'),
@@ -100,27 +130,15 @@ urlpatterns = [
     path('modifier-target/<int:target_id>/', ModifierTarget.as_view(), name='modifier_target'),
     path('supprimer-target/<int:target_id>/', SupprimerTarget.as_view(), name='supprimer_target'),
 
+    # list target of client
+    path('list-targetclient/', ClientTargetsView.as_view(), name='list_targetclient'),
+
     # pos CRUD API
     path('ajouter-pos/', CreatePosView.as_view(), name='ajouter_pos'),
     path('list-pos/', ListPosView.as_view(), name='list_pos'),
 
-    # settings setting_countries CRUD API
-    path('ajouter-countries/', AjouterCountries.as_view(), name='ajouter_countries'),
-    path('modifier-contries/<int:country_id>/', ModifierCountries.as_view(), name='modifier_countries'),
-    path('list-countries/', ListeCountries.as_view(), name='list_setting_contries'),
-    path('supprimer-contries/<int:country_id>/', DeleteCountriesView.as_view(), name='supprimer_contries'),
-
-    # settings setting_level CRUD API
-    path('ajouter-level/', AjouterEducationLevel.as_view(), name='ajouter_level'),
-    path('modifier-level/<int:education_id>/', ModifierEducationLevel.as_view(), name='modifier_level'),
-    path('list-level/', ListeEducationLevel.as_view(), name='list_level'),
-    path('supprimer-level/<int:education_id>/', DeleteEducationLevel.as_view(), name='supprimer_level'),
-
-    # settings setting_typeID CRUD API
-    path('ajouter-typeid/', AjouterTypeId.as_view(), name='ajouter_typeid'),
-    path('modifier-typeid/<int:type_id>/', ModifierTypeId.as_view(), name='modifier_typeid'),
-    path('list-typeid/', ListeTypeId.as_view(), name='list_setting_typeid'),
-    path('supprimer-typeid/<int:type_id>/', DeleteTypeId.as_view(), name='supprimer_typeid'),
+    # list pos of client
+    path('list-posclient/', ClientPosView.as_view(), name='list_posclient'),
 
     # training CRUD API
     path('ajouter-training/', TrainingCreate.as_view(), name='ajouter_training'),
@@ -142,8 +160,8 @@ urlpatterns = [
 
     # quiz section CRUD API
     path('ajouter-quiz/', QuizSectionCreate.as_view(), name='ajouter_quiz'),
-    path('modifier-quiz/<int:quiz_section_id>/', ModifierQuiz.as_view(), name='modifier_quiz'),
-    path('list-quiz/', QuizList.as_view(), name='list_quiz'),
+    path('modifier-quiz/<int:quiz_section_id>/', ModifierSectionQuiz.as_view(), name='modifier_quiz'),
+    path('list-quiz/', QuizSectionList.as_view(), name='list_quiz'),
 
     # answer section CRUD APi
     path('ajouter-answersection/', AnswerSectionCreate.as_view(), name='ajouter_answersection'),
@@ -170,7 +188,14 @@ urlpatterns = [
     path('list-userscore/', UserScoreList.as_view(), name='list_userscore'),
 
 
-    path('domaine/', DomaineViewSet.as_view({'get': 'list'}), name='domaine'),
+
+
+
+
+
+
+
+
     path('pos-upload-excel/', PosExcelUploadViewSet.as_view({'post': 'create'}), name='pos-upload-excel'),
     path('typeid/<int:pk>/', TypeIDDetail.as_view(), name='typeid-detail'),
     path('search-token-pin/<str:token>/<str:pin>/<str:phone>/', search_token_pin, name='search_token_pin'),
@@ -181,22 +206,8 @@ urlpatterns = [
     path('educations/<int:pk>/', EducationViewSet.as_view({'get': 'retrieve', 'put': 'update', 'delete': 'destroy'}), name='education-detail'),
     path('typepiece/', TypeIDViewSet.as_view({'get': 'list', 'post': 'create'}), name='education-list'),
     path('typepiece/<int:pk>/', TypeIDViewSet.as_view({'get': 'retrieve', 'put': 'update', 'delete': 'destroy'}), name='education-detail'),
-    path('localite/', LocalityViewSet.as_view({'get': 'list', 'post': 'create'}), name='localite-list'),
-    path('localite/<int:pk>/', LocalityViewSet.as_view({'get': 'retrieve', 'put': 'update', 'delete': 'destroy'}), name='localite-detail'),
-    path('industry/', IndustryViewSet.as_view({'get': 'list', 'post': 'create'}), name='industry'),
     path('generate_token_pin/<str:phone_number>', generate_token_pin),
     path('check_otp/<str:token>/<str:otp>', check_otp) ,
     path('uploadImages/', upload_image, name='upload'),
     
-
-    #########################################################  USER ADMIN API PART  ##########################################################
-
-
-
-    
 ]+ static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-
-
-
-
-# /home/kouadio/Téléchargements/webapptest 4/webapptest/field360App/media

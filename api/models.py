@@ -1,12 +1,11 @@
 from django.db import models
 from django.utils import timezone
-from django.contrib.auth.models import UserManager
-from django.db import models
-import datetime
-from django.db.models import Count
-from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
+from django.db.models import Sum
+from django.dispatch import receiver
+from django.db.models.signals import post_save
+from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, UserManager
 
-
+# Pos Model
 class Pos(models.Model):
     id_pos = models.AutoField(primary_key=True)
     pos_countrie = models.ForeignKey('Countries', on_delete=models.PROTECT, null=True, blank=True)
@@ -19,7 +18,7 @@ class Pos(models.Model):
     numb_pos = models.IntegerField(default=0)
     user = models.ForeignKey('User', on_delete=models.CASCADE, null=True, blank=True)
 
-
+# Target Model
 class Target(models.Model):
     id_target = models.AutoField(primary_key=True)
     target_countrie = models.ForeignKey('Countries', on_delete=models.PROTECT, null=True, blank=True)
@@ -31,6 +30,7 @@ class Target(models.Model):
     target_airtelmoney = models.DecimalField(max_digits=8, decimal_places=3)
     user = models.ForeignKey('User', on_delete=models.CASCADE, null=True, blank=True)
 
+# Media Model
 class Media(models.Model):
     id_media = models.AutoField(primary_key=True)
     file = models.FileField(upload_to='./field360App/media/')
@@ -40,6 +40,7 @@ class Media(models.Model):
     def __str__(self):
         return str(self.id_media)
 
+# Domaine Model
 class Domaine(models.Model):
     id_domaine = models.AutoField(primary_key=True)
     domaine_name = models.CharField(max_length=100, null=False, blank=False, unique=True)
@@ -47,16 +48,17 @@ class Domaine(models.Model):
     def __str__(self):
         return self.domaine_name
 
+# Industry Model
 class Industry(models.Model):
     id_industry = models.AutoField(primary_key=True)
     industry_name = models.CharField(max_length=100, null=False, blank=False, unique=True)
-    industry_status = models.CharField(max_length=10, null=False, blank=False, unique=True)
+    industry_status = models.IntegerField(default=1)
     timestamp = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return self.industry_name
 
-
+# Footsoldiers Model
 class Footsoldiers(models.Model):
     id_footsoldiers = models.AutoField(primary_key=True)
     footsoldiers_country = models.ForeignKey('Countries', on_delete=models.PROTECT, null=True, blank=True)
@@ -69,17 +71,8 @@ class Footsoldiers(models.Model):
 
     def __str__(self):
         return self.footsoldiers_fullname
-    
-# class UsersClientUser(models.Model):
-#     id_usersclientuser = models.AutoField(primary_key=True)
-#     identifiant = models.CharField(max_length=100, null=False, blank=False, unique=True)
-#     name = models.CharField(max_length=100, null=False, blank=False, unique=True)
-#     timestamp = models.DateTimeField(auto_now_add=True)
-#     privilege = models.ForeignKey('Privilege', on_delete=models.PROTECT, null=True, blank=True)
-
-#     def __str__(self):
-#         return self.userclientuser_name
-    
+      
+# UsersClient Model
 class UsersClient(models.Model):
     id_userclient = models.AutoField(primary_key=True)
     userclient_email = models.CharField(max_length=100, null=False, blank=False, unique=True)
@@ -95,6 +88,7 @@ class UsersClient(models.Model):
     def __str__(self):
         return self.userclient_name
     
+# Produit Model
 class Produit(models.Model):
     id_product = models.AutoField(primary_key=True)
     product_picture = models.ImageField(upload_to='./field360App/media/', null=True, blank=True)
@@ -109,13 +103,14 @@ class Produit(models.Model):
     def __str__(self):
         return self.product_name
 
+# Countries Model
 class Countries(models.Model):
     id_country = models.AutoField(primary_key=True)
-    country_name = models.CharField(max_length=100, null=False, blank=False)
-    country_prefixe = models.CharField(max_length=10, null=False, blank=False)
+    country_name = models.CharField(max_length=100, null=False, blank=False, unique=True)
+    country_prefixe = models.CharField(max_length=10, null=False, blank=False, unique=True)
     flag = models.ImageField(upload_to='./field360App/media/', default='')
     user = models.ForeignKey('User', on_delete=models.CASCADE, null=True, blank=True)
-    number_clients = models.IntegerField(default=0, editable=True)
+    numbers_of_clients = models.IntegerField(default=0, editable=False)
 
     def __str__(self):
         return self.country_name
@@ -134,6 +129,11 @@ class Clients(models.Model):
     def __str__(self):
         return self.client_name
     
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        country = self.country_id
+        country.numbers_of_clients = Clients.objects.filter(country_id=country).count()
+        country.save()
 
 class TypeID(models.Model):
     id_type = models.AutoField(primary_key=True)
@@ -145,26 +145,28 @@ class TypeID(models.Model):
     def __str__(self):
         return f"{self.id_country.country_name} - {self.id_name}"
 
+# EducationLevel Model
 class EducationLevel(models.Model):
     id_education = models.AutoField(primary_key=True)
     id_country = models.ForeignKey('Countries', on_delete=models.CASCADE)
     level_name = models.CharField(max_length=100, null=False, blank=False)
-    level_number = models.IntegerField()
+    level_number = models.IntegerField(default=0)
     user = models.ForeignKey('User', on_delete=models.CASCADE, null=True, blank=True)
 
     def __str__(self):
         return f"{self.id_country.country_name} - {self.level_name}"
 
+# Training Model
 class Training(models.Model):
     id_training = models.AutoField(primary_key=True)
     id_client = models.ForeignKey(Clients, on_delete=models.CASCADE)
     produit_id = models.ForeignKey(Produit, on_delete=models.CASCADE)
     training_name = models.CharField(max_length=100, null=False, blank=False)
-    training_onBoarding = models.CharField(max_length=100, null=False, blank=False)
-    training_min_score = models.CharField(max_length=100, null=False, blank=False)
+    training_onBoarding = models.BooleanField(default=True)
+    training_min_score = models.FloatField(default=0)
     training_description = models.TextField()
-    training_mode = models.CharField(max_length=100, null=False, blank=False, default='')
-    training_statut = models.CharField(max_length=100, null=False, blank=False, default='')
+    training_mode = models.IntegerField(default=0)
+    training_statut = models.IntegerField(default=0)
     training_category = models.CharField(max_length=100, null=False, blank=False, default='')
     countrie_id = models.ForeignKey(Countries, on_delete=models.CASCADE, default='')
     user = models.ForeignKey('User', on_delete=models.CASCADE, null=True, blank=True)
@@ -173,6 +175,7 @@ class Training(models.Model):
     def __str__(self):
         return f"{self.id_client.country_name} - {self.training_name}"
 
+# Sections Model
 class Sections(models.Model):
     id_section = models.AutoField(primary_key=True)
     id_formation = models.ForeignKey(Training, on_delete=models.CASCADE)
@@ -183,6 +186,7 @@ class Sections(models.Model):
     def __str__(self):
         return f"{self.id_formation.formation_name} - {self.sections_name}"
 
+# QuizSection Model
 class QuizSection(models.Model):
     id_quiz_section = models.AutoField(primary_key=True)
     id_section = models.ForeignKey(Sections, on_delete=models.CASCADE)
@@ -196,7 +200,7 @@ class QuizSection(models.Model):
     def __str__(self):
         return f" {self.id_section.sections_name} - {self.quiz_question_name}"
 
-
+# Chapters Model
 class Chapters(models.Model):
     id_chapter = models.AutoField(primary_key=True)
     id_section = models.ForeignKey(Sections, on_delete=models.CASCADE)
@@ -208,7 +212,7 @@ class Chapters(models.Model):
     def __str__(self):
         return f"{self.id_section.sections_name} - {self.chapitres_name}"
 
-
+# Exam Model
 class Exam(models.Model):
     id_examen = models.AutoField(primary_key=True)
     id_training = models.ForeignKey(Training, on_delete=models.CASCADE)
@@ -219,7 +223,6 @@ class Exam(models.Model):
 
     def __str__(self):
         return f"{self.id_training.formation_name} - {self.examen_name}"
-
 
 # id_quiz_examen,id_examen,quiz_question_name,quiz_question_points,quiz_question_type,quiz_question_media,examen_description
 class QuizExamen(models.Model):
@@ -232,10 +235,10 @@ class QuizExamen(models.Model):
     quiz_description = models.TextField()
     user = models.ForeignKey('User', on_delete=models.CASCADE, null=True, blank=True)
 
-
     def __str__(self):
         return f"{self.id_examen.exam_name} - {self.quiz_question_name}"
 
+# Privilege Model
 class Privilege(models.Model):
     name = models.CharField(max_length=255, unique=True)
     description = models.TextField()
@@ -248,7 +251,7 @@ class Privilege(models.Model):
     def __str__(self):
         return self.name
 
-
+# AnswersExamen Model
 class AnswersExamen(models.Model):
     id_answer_examen = models.AutoField(primary_key=True)
     id_quiz_examen = models.ForeignKey(QuizExamen, on_delete=models.CASCADE)
@@ -259,6 +262,7 @@ class AnswersExamen(models.Model):
     def __str__(self):
         return f"{self.id_quiz.quiz_question_name} - {self.answer_label}"
 
+# AnswersSection Model
 class AnswersSection(models.Model):
     id_answer_section = models.AutoField(primary_key=True)
     id_quiz = models.ForeignKey(QuizSection, on_delete=models.CASCADE, related_name='id_QuizSection_id')
@@ -268,6 +272,7 @@ class AnswersSection(models.Model):
     def __str__(self):
         return f"{self.id_quiz.quiz_question_name} - {self.answer_label}"
 
+# Locality Model
 class Locality(models.Model):
     id_locality = models.AutoField(primary_key=True)
     id_country = models.ForeignKey(Countries, on_delete=models.DO_NOTHING)
@@ -275,6 +280,7 @@ class Locality(models.Model):
     def __str__(self):
         return f" {self.id_country.country_name} - {self.locality_name}"
 
+# UserExam Model
 class UserExam(models.Model):
     id_user_exam = models.AutoField(primary_key=True)
     id_quiz = models.ForeignKey(QuizExamen, on_delete=models.DO_NOTHING)
@@ -285,6 +291,7 @@ class UserExam(models.Model):
     def __str__(self):
         return f" {self.id_quiz.quiz_question_name} - {self.choice}"
 
+# UserQuiz Model
 class UserQuiz(models.Model):
     id_user_quiz = models.AutoField(primary_key=True)
     id_quiz = models.ForeignKey(QuizSection, on_delete=models.DO_NOTHING)
@@ -293,7 +300,6 @@ class UserQuiz(models.Model):
 
     def __str__(self):
         return f" {self.id_quiz.quiz_question_name} - {self.choice}"
-
 
 # dashboards model  
 class Dashboards(models.Model):
@@ -304,7 +310,7 @@ class Dashboards(models.Model):
     def __str__(self):
         return self.dashboard_name   
 
-
+# User model
 class User(AbstractBaseUser, PermissionsMixin):
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
@@ -337,6 +343,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     def __str__(self):
         return f"{self.nom} {self.prenoms}"
 
+# PisteAudite model
 class PisteAudite(models.Model):
     id_piste_audit = models.AutoField(primary_key=True)
     client = models.FileField(blank=False, null=False)
@@ -346,6 +353,7 @@ class PisteAudite(models.Model):
     def __str__(self):
         return self.id_piste_audit
 
+# TokenPin model
 class TokenPin(models.Model):
     phone_number = models.CharField(max_length=20)
     token = models.CharField(max_length=40, unique=True)
@@ -354,9 +362,8 @@ class TokenPin(models.Model):
     def __str__(self):
         return self.token
 
-
+# Kyc model
 class Kyc(models.Model):
-    # kyc_field = models.IntegerField()
     kycAgentid = models.ForeignKey(User, on_delete=models.DO_NOTHING, related_name='kyc_agent_id', null=True)
     userId = models.ForeignKey(User, on_delete=models.DO_NOTHING, related_name='user_agent_id', null=True)
     createdAt = models.DateTimeField(default=timezone.now, null=False, blank=True)
@@ -394,6 +401,7 @@ class Kyc(models.Model):
     def __str__(self):
         return "{}".format(self.nom)
 
+# UserScoreExam model
 class UserScoreExam(models.Model):
     id_user_score = models.AutoField(primary_key=True)
     id_exam = models.ForeignKey(Exam, on_delete=models.DO_NOTHING)
@@ -405,6 +413,7 @@ class UserScoreExam(models.Model):
     def __str__(self):
         return f"{self.results}"
 
+# UserScoreQuiz model
 class UserScoreQuiz(models.Model):
     id_user_score = models.AutoField(primary_key=True)
     id_quiz = models.ForeignKey(QuizSection, on_delete=models.DO_NOTHING)
